@@ -1,8 +1,10 @@
 const crypto = require('node:crypto');
 
 const GRAPH_VERSION = 1;
+const CONTEXT_VERSION = 2;
 const MAX_CONTEXT_MEMORIES = 8;
 const MAX_GRAPH_FACTS = 12;
+const MAX_CONTEXT_TEXT = 1800;
 
 function normalise(value, max = 500) {
   return String(value || '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -329,6 +331,56 @@ function memoryInbox(db, learnerId, includeArchived = true) {
   }));
 }
 
+function keywords(value) {
+  return new Set(
+    normalise(value, 2000)
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length >= 3 && !['the', 'and', 'with', 'from', 'that', 'this', 'learner', 'current'].includes(token)),
+  );
+}
+
+function overlapScore(first, second) {
+  let score = 0;
+  for (const token of first) if (second.has(token)) score += 1;
+  return score;
+}
+
+function validTime(value) {
+  const time = Date.parse(String(value || ''));
+  return Number.isFinite(time) ? time : 0;
+}
+
+function rankMemory(memory, objectiveTokens, skillTokens, now) {
+  const memoryTokens = keywords(`${memory.type} ${memory.content} ${memory.sourceObjective || ''}`);
+  const typeWeight = { skill: 3, misconception: 2.8, pedagogical: 2.2, preference: 1.5 }[memory.type] || 1;
+  const evidenceWeight = Math.min(3, Math.log2(Math.max(1, memory.evidenceCount)) + 1);
+  const confidenceWeight = Math.max(0, Math.min(1, memory.confidence)) * 4;
+  const ageDays = Math.max(0, (now - validTime(memory.lastConfirmed)) / 86_400_000);
+  const recencyWeight = Math.max(0, 2.5 - Math.log10(ageDays + 1));
+  const relevanceWeight = overlapScore(memoryTokens, objectiveTokens) * 2 + overlapScore(memoryTokens, skillTokens);
+  const reviewWeight = memory.reviewAfter && validTime(memory.reviewAfter) <= now ? 1.5 : 0;
+  return typeWeight + evidenceWeight + confidenceWeight + recencyWeight + relevanceWeight + reviewWeight;
+}
+
+function boundedLines(lines, max = MAX_CONTEXT_TEXT) {
+  const output = [];
+  let length = 0;
+  for (const raw of lines) {
+    const line = normalise(raw, 500);
+    if (!line) continue;
+    const addition = (output.length ? 1 : 0) + line.length;
+    if (length + addition > max) {
+      const remaining = max - length - (output.length ? 1 : 0);
+      if (remaining > 20) output.push(`${line.slice(0, remaining - 1)}…`);
+      break;
+    }
+    output.push(line);
+    length += addition;
+  }
+  return output.join('\n');
+}
+
 function buildContextPacket(db, learnerId, objective = 'Current lesson') {
   const profile = queryOne(db, 'SELECT * FROM profile WHERE learner_id = ?', [learnerId]);
   if (!profile) throw new Error('Learner profile is unavailable.');
@@ -346,31 +398,61 @@ function buildContextPacket(db, learnerId, objective = 'Current lesson') {
     lastPractised: row.last_practised || null,
     nextReview: row.next_review || null,
   }));
-  const relevantMemories = memoryInbox(db, learnerId, false).slice(0, MAX_CONTEXT_MEMORIES);
+
+  const objectiveText = normalise(objective, 160);
+  const objectiveTokens = keywords(objectiveText);
+  const skillTokens = keywords(skills.map((skill) => `${skill.domain} ${skill.name}`).join(' '));
+  const now = Date.now();
+  const relevantMemories = memoryInbox(db, learnerId, false)
+    .map((memory) => ({ ...memory, relevanceScore: Number(rankMemory(memory, objectiveTokens, skillTokens, now).toFixed(3)) }))
+    .sort((a, b) => b.relevanceScore - a.relevanceScore || validTime(b.lastConfirmed) - validTime(a.lastConfirmed))
+    .slice(0, MAX_CONTEXT_MEMORIES);
+
   const graph = graphSnapshot(db, learnerId, 100, 200);
   const nodeById = new Map(graph.nodes.map((node) => [node.nodeId, node]));
   const graphFacts = graph.edges
     .filter((edge) => edge.provenance === 'EXTRACTED' || edge.provenance === 'DERIVED')
-    .slice(0, MAX_GRAPH_FACTS)
-    .map((edge) => ({
-      source: nodeById.get(edge.sourceNodeId)?.label || edge.sourceNodeId,
-      relation: edge.relation,
-      target: nodeById.get(edge.targetNodeId)?.label || edge.targetNodeId,
-      confidence: edge.confidence,
-      evidenceCount: edge.evidenceCount,
-      provenance: edge.provenance,
-    }));
+    .map((edge) => {
+      const sourceNode = nodeById.get(edge.sourceNodeId);
+      const targetNode = nodeById.get(edge.targetNodeId);
+      const tokens = keywords(`${sourceNode?.label || ''} ${edge.relation} ${targetNode?.label || ''}`);
+      const relevanceScore =
+        overlapScore(tokens, objectiveTokens) * 2 +
+        overlapScore(tokens, skillTokens) +
+        edge.confidence * 2 +
+        Math.min(2, Math.log2(Math.max(1, edge.evidenceCount)) + 0.5);
+      return {
+        source: sourceNode?.label || edge.sourceNodeId,
+        sourceKind: sourceNode?.kind || 'unknown',
+        relation: edge.relation,
+        target: targetNode?.label || edge.targetNodeId,
+        targetKind: targetNode?.kind || 'unknown',
+        confidence: edge.confidence,
+        evidenceCount: edge.evidenceCount,
+        provenance: edge.provenance,
+        relevanceScore: Number(relevanceScore.toFixed(3)),
+      };
+    })
+    .sort((a, b) => b.relevanceScore - a.relevanceScore)
+    .slice(0, MAX_GRAPH_FACTS);
 
-  const lines = [
-    `Objective: ${normalise(objective, 160)}`,
-    ...skills.slice(0, 3).map((skill) => `Skill: ${skill.name}; mastery ${skill.mastery}%; status ${skill.status}.`),
-    ...relevantMemories.map((memory) => `Memory (${memory.type}, ${Math.round(memory.confidence * 100)}% confidence, ${memory.evidenceCount} evidence): ${memory.content}`),
-  ];
+  const skillLines = skills.slice(0, 3).map((skill) => `Skill: ${skill.name}; mastery ${skill.mastery}%; status ${skill.status}.`);
+  const memoryLines = relevantMemories.map(
+    (memory) => `Memory (${memory.type}, ${Math.round(memory.confidence * 100)}% confidence, ${memory.evidenceCount} evidence): ${memory.content}`,
+  );
+  const graphLines = graphFacts.map(
+    (fact) => `Graph: ${fact.source} ${fact.relation.toLowerCase().replaceAll('_', ' ')} ${fact.target} (${fact.provenance.toLowerCase()}).`,
+  );
+  const providerGraphLines = graphFacts.map((fact) => {
+    const source = fact.sourceKind === 'learner' ? 'Learner' : fact.source;
+    const target = fact.targetKind === 'learner' ? 'Learner' : fact.target;
+    return `Graph: ${source} ${fact.relation.toLowerCase().replaceAll('_', ' ')} ${target}.`;
+  });
 
   return {
-    version: 1,
+    version: CONTEXT_VERSION,
     generatedAt: new Date().toISOString(),
-    objective: normalise(objective, 160),
+    objective: objectiveText,
     learner: {
       learnerId,
       preferredName: profile.preferred_name,
@@ -381,7 +463,8 @@ function buildContextPacket(db, learnerId, objective = 'Current lesson') {
     skills,
     relevantMemories,
     graphFacts,
-    summaryText: normalise(lines.join('\n'), 1800),
+    summaryText: boundedLines([`Objective: ${objectiveText}`, ...skillLines, ...memoryLines, ...graphLines]),
+    providerText: boundedLines([`Objective: ${objectiveText}`, ...skillLines, ...memoryLines, ...providerGraphLines]),
   };
 }
 
@@ -404,10 +487,14 @@ function recordMemoryEvent(db, learnerId, event) {
 }
 
 module.exports = {
+  CONTEXT_VERSION,
   GRAPH_VERSION,
+  MAX_CONTEXT_MEMORIES,
+  MAX_GRAPH_FACTS,
   buildContextPacket,
   graphSnapshot,
   memoryInbox,
+  rankMemory,
   rebuildMemoryGraph,
   recordMemoryEvent,
   relationForMemory,
