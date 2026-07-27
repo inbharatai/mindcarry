@@ -17,7 +17,7 @@ jobs:
   verify:
     name: Verify on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -48,3 +48,7 @@ jobs:
 
       - name: Type-check and build renderer
         run: npm run build
+
+      - name: Verify Windows Electron package layout
+        if: runner.os == 'Windows'
+        run: npx electron-builder --dir --win --x64
