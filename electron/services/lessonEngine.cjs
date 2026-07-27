@@ -1,4 +1,4 @@
-const QUESTIONS = Object.freeze([
+const QUESTION_DATA = [
   {
     id: 'add-7-5',
     skill: 'addition-within-20',
@@ -8,12 +8,12 @@ const QUESTIONS = Object.freeze([
     visual: '🦕🦕🦕🦕🦕🦕🦕 + 🦖🦖🦖🦖🦖',
   },
   {
-    id: 'add-8-4',
+    id: 'add-8-3',
     skill: 'addition-within-20',
-    prompt: 'What is 8 plus 4?',
-    answer: 12,
+    prompt: 'What is 8 plus 3?',
+    answer: 11,
     representation: 'pictorial',
-    visual: '●●●●●●●● + ●●●●',
+    visual: '●●●●●●●● + ●●●',
   },
   {
     id: 'add-9-6-transfer',
@@ -23,7 +23,9 @@ const QUESTIONS = Object.freeze([
     representation: 'transfer',
     visual: '■■■■■■■■■ + ■■■■■■',
   },
-]);
+];
+
+const QUESTIONS = Object.freeze(QUESTION_DATA.map((question) => Object.freeze({ ...question })));
 
 const NUMBER_WORDS = Object.freeze({
   zero: 0,
@@ -51,13 +53,21 @@ const NUMBER_WORDS = Object.freeze({
 
 function normaliseNumericAnswer(input) {
   if (typeof input === 'number' && Number.isFinite(input)) return input;
-  const text = String(input ?? '').trim().toLowerCase().replace(/[.,!?]/g, ' ');
-  const numeric = text.match(/-?\d+/);
-  if (numeric) return Number(numeric[0]);
-  for (const token of text.split(/\s+/)) {
-    if (Object.prototype.hasOwnProperty.call(NUMBER_WORDS, token)) return NUMBER_WORDS[token];
+  const text = String(input ?? '').trim().toLowerCase();
+  const candidates = [];
+
+  for (const match of text.matchAll(/-?\d+(?:\.\d+)?/g)) {
+    candidates.push({ index: match.index ?? 0, value: Number(match[0]) });
   }
-  return Number.NaN;
+
+  for (const match of text.matchAll(/[a-z]+/g)) {
+    if (Object.prototype.hasOwnProperty.call(NUMBER_WORDS, match[0])) {
+      candidates.push({ index: match.index ?? 0, value: NUMBER_WORDS[match[0]] });
+    }
+  }
+
+  candidates.sort((a, b) => a.index - b.index);
+  return candidates.length ? candidates[candidates.length - 1].value : Number.NaN;
 }
 
 function classifyMisconception(question, parsed) {
@@ -92,9 +102,9 @@ function chooseIntervention(assessment, learner = {}) {
     return { type: 'transfer', message: 'You solved that independently. Let us check the same idea with a new example.' };
   }
   const interests = Array.isArray(learner.interests)
-    ? learner.interests.map((item) => String(item).trim().toLowerCase())
+    ? learner.interests.map((item) => String(item).trim().toLowerCase()).filter(Boolean)
     : [];
-  const theme = interests[0];
+  const theme = interests[0]?.slice(0, 50);
   if (theme) {
     return {
       type: 'visual-interest',
