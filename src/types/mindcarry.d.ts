@@ -17,6 +17,10 @@ declare global {
         create: (payload: CreateLearnerPayload) => Promise<LearnerManifest>;
         unlock: (learnerId: string, passphrase: string) => Promise<Dashboard>;
         dashboard: (learnerId: string) => Promise<Dashboard>;
+        memoryInbox: (learnerId: string) => Promise<MemoryInboxItem[]>;
+        memoryGraph: (learnerId: string) => Promise<MemoryGraphSnapshot>;
+        archiveMemory: (learnerId: string, memoryId: string) => Promise<Dashboard>;
+        restoreMemory: (learnerId: string, memoryId: string) => Promise<Dashboard>;
         lock: (learnerId: string) => Promise<{ ok: boolean }>;
         export: (learnerId: string) => Promise<{ canceled: boolean; filePath?: string }>;
         import: () => Promise<{ canceled: boolean; manifest?: LearnerManifest }>;
@@ -123,12 +127,103 @@ declare global {
     evidence_count?: number;
   }
 
+  interface MemoryInboxItem {
+    memoryId: string;
+    type: string;
+    content: string;
+    confidence: number;
+    evidenceCount: number;
+    active: boolean;
+    createdAt: string;
+    lastConfirmed: string;
+    reviewAfter: string | null;
+    sourceSessionId: string | null;
+    sourceObjective: string | null;
+    sourceSummary: string | null;
+    sourceStartedAt: string | null;
+    graphEdgeCount: number;
+  }
+
+  interface MemoryGraphNode {
+    nodeId: string;
+    kind: string;
+    label: string;
+    attributes: Record<string, unknown>;
+    confidence: number;
+    evidenceCount: number;
+    createdAt: string;
+    updatedAt: string;
+  }
+
+  interface MemoryGraphEdge {
+    edgeId: string;
+    sourceNodeId: string;
+    relation: string;
+    targetNodeId: string;
+    confidence: number;
+    evidenceCount: number;
+    sourceMemoryId: string | null;
+    sourceSession: string | null;
+    provenance: 'EXTRACTED' | 'DERIVED' | 'PARENT';
+    createdAt: string;
+    updatedAt: string;
+  }
+
+  interface MemoryGraphSnapshot {
+    version: number;
+    generatedAt: string | null;
+    nodes: MemoryGraphNode[];
+    edges: MemoryGraphEdge[];
+  }
+
+  interface ContextMemory extends MemoryInboxItem {}
+
+  interface ContextSkill {
+    skillId: string;
+    domain: string;
+    name: string;
+    mastery: number;
+    status: string;
+    attempts: number;
+    lastPractised: string | null;
+    nextReview: string | null;
+  }
+
+  interface ContextGraphFact {
+    source: string;
+    relation: string;
+    target: string;
+    confidence: number;
+    evidenceCount: number;
+    provenance: 'EXTRACTED' | 'DERIVED' | 'PARENT';
+  }
+
+  interface LearnerContextPacket {
+    version: number;
+    generatedAt: string;
+    objective: string;
+    learner: {
+      learnerId: string;
+      preferredName: string;
+      age: number;
+      language: string;
+      interests: string[];
+    };
+    skills: ContextSkill[];
+    relevantMemories: ContextMemory[];
+    graphFacts: ContextGraphFact[];
+    summaryText: string;
+  }
+
   interface Dashboard {
     profile: LearnerProfile;
     consent: ConsentRecord;
     skills: SkillRecord[];
     recentSessions: SessionRecord[];
     memories: MemoryRecord[];
+    memoryInbox: MemoryInboxItem[];
+    memoryGraph: MemoryGraphSnapshot;
+    contextPacket: LearnerContextPacket;
   }
 
   interface LessonQuestion {
@@ -144,6 +239,7 @@ declare global {
     sessionId: string;
     question: LessonQuestion;
     greeting: string;
+    memoryContextLoaded?: number;
   }
 
   interface LessonAnswerPayload {
