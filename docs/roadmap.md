@@ -1,141 +1,141 @@
 # Roadmap
 
-The roadmap is organised by evidence gates rather than feature count. A stage is complete only when its acceptance tests pass.
+MindCarry’s roadmap is organised by evidence gates, not feature count. A stage is complete only when its acceptance evidence exists.
 
-## Stage 0 — Specification and architecture
+## Stage 0 — Product and trust-boundary specification
 
-Status: substantially complete.
+**Status: complete for the first vertical slice.**
 
-- product specification;
-- first tutoring flow;
-- Learner Memory schema;
-- portable `.childmind` design;
-- privacy and trust boundaries;
-- concept walkthrough;
-- first acceptance-test scenario.
+- product purpose and child/family ownership principle;
+- addition-within-20 tutoring flow;
+- encrypted Learner Memory schema;
+- Memory Inbox and local graph design;
+- provider-independent context boundary;
+- portable `.childmind` format;
+- privacy, architecture and threat documents;
+- synthetic acceptance scenario.
 
-## Stage 1 — Implementation-ready pre-MVP
+## Stage 1 — Repository-complete pre-MVP
 
-Status: repository implementation created; CI and target-device verification are the gate.
+**Status: implemented; final CI is the repository gate. Target-device evidence is still missing.**
 
-- Electron + React + TypeScript desktop shell;
-- automatic local vault;
-- automatic per-learner folders;
-- encrypted learner database;
-- encrypted device catalogue;
-- parent-passphrase flow;
-- deterministic addition-within-20 lesson;
-- typed and browser/OS speech input;
-- optional local movement cue;
-- Gemini provider adapter and deterministic fallback;
-- `.childmind` export/import;
-- Windows installation automation;
-- Windows/Linux CI;
-- unit and integration tests.
+- hardened Electron + React + TypeScript shell;
+- automatic encrypted local vault and learner catalogue;
+- deterministic three-question maths lesson;
+- typed and supported OS/browser speech input;
+- optional local movement experiment;
+- parent-visible Memory Inbox;
+- deterministic graph and ranked context;
+- Gemini test-key adapter and deterministic fallback;
+- strict `.childmind` export/import;
+- main-only Windows setup;
+- committed dependency lockfile and `npm ci`;
+- Windows/Ubuntu CI, production dependency audit and CodeQL;
+- security, portability and integration tests.
 
-Exit criteria:
+**Exit criteria:**
 
-- CI green on Windows and Linux;
-- target Windows application launches;
-- vault is created automatically;
-- first lesson persists after restart;
-- Gemini key success and failure paths pass;
-- export/import works across two installations.
+- final Windows and Ubuntu CI succeeds;
+- CodeQL succeeds;
+- no committed key, learner export or real-child data;
+- README and status documents match the tested repository.
 
 ## Stage 2 — Functioning founder-tested prototype
 
-- fix all defects found in the first-device acceptance test;
-- package Windows portable and installer builds;
-- verify microphone consent paths;
-- verify optional camera consent paths;
-- add parent-visible complete data inventory;
-- add learner deletion;
-- add individual memory deletion and correction;
-- add passphrase change;
-- add verified backup/restore flow;
-- add explicit session crash recovery;
-- commit dependency lockfile and add vulnerability scanning;
-- configure Electron fuses;
-- create signed synthetic demo evidence.
+**Status: next.**
 
-Exit criteria:
+- clean install and launch on the founder’s Windows machine;
+- verify DPAPI secure storage and automatic vault;
+- visually test every screen and interaction;
+- complete deterministic and real-Gemini lessons;
+- test timeout, rate-limit, revoked-key and offline fallback;
+- verify microphone and optional camera allow/deny/cleanup;
+- verify archive/restore changes next-session context;
+- verify close/reopen and forced-interruption behaviour;
+- transfer `.childmind` across two actual clean installations;
+- launch unsigned Windows installer and portable build;
+- fix every discovered defect;
+- retain reproducible synthetic evidence.
 
-- repeated clean installs work;
-- no known critical/high security defect;
-- one complete demo can be reproduced without developer intervention;
-- all claims in README match demonstrated behaviour.
+**Exit criteria:**
 
-## Stage 3 — Supervised family alpha
+- repeated clean installs work without developer repair;
+- one complete synthetic demo is reproducible;
+- no known critical/high repository or device defect;
+- all README claims match demonstrated behaviour.
 
-Target: 5–10 children and parents already accessible to the founder.
+## Stage 3 — Parent controls and supervised-family readiness
 
-- informed parent consent and test protocol;
+- parent correction of a memory;
+- permanent individual-memory deletion and audit semantics;
+- full learner deletion;
+- passphrase change/recovery decision;
+- verified external backup and restore UI;
+- stronger crash/session recovery;
+- Electron fuse configuration;
+- accessibility and usability review;
+- educator validation of assessment/mastery rules;
+- written parent consent, safeguarding and incident protocol;
+- retention configuration and complete data inventory.
+
+**Exit criteria:**
+
+- families can understand and control stored data;
+- restore and deletion claims are demonstrable;
+- educator/safeguarding review approves supervised use;
+- founder-device defects are closed.
+
+## Stage 4 — Supervised family alpha
+
+**Target: a small founder-supervised cohort using synthetic setup first, followed by explicit parent consent.**
+
+- 5–10 parent/child participants;
 - supervised sessions only;
 - no raw camera/audio retention;
-- foundational maths curriculum expansion;
-- phonics and early reading vertical slice;
-- session-level parent feedback;
-- usability and accessibility testing;
-- latency and API-cost measurement;
-- error and safeguarding incident process;
-- personal engagement baseline based on repeated sessions;
-- memory confidence, contradiction and expiry rules.
+- expanded foundational maths;
+- phonics/early-reading vertical slice;
+- parent session feedback;
+- latency/API-cost measurement;
+- contradiction, confidence and expiry rules;
+- personal engagement baselines based on repeated sessions;
+- accessibility fixes.
 
-Exit criteria:
+**Exit criteria:**
 
-- families can operate the product without developer support;
-- learning records remain accurate after repeated sessions;
+- parents operate the product without developer intervention;
+- records remain accurate across repeated sessions;
 - no important decision relies on one behavioural cue;
-- parents understand what is local and what is sent to Gemini.
+- parents understand local data and provider data clearly.
 
-## Stage 4 — Private beta
+## Stage 5 — Private beta
 
-- Gemini Live or another real-time voice provider;
-- interruption and turn-taking;
-- stronger curriculum graph and prerequisite checks;
-- spaced review;
+- real-time voice provider or equivalent turn-taking;
+- curriculum prerequisite graph and spaced review;
 - richer mastery model validated with educators;
 - writing support with explicit parent consent;
-- parent dashboard for goals, memories and retention;
+- parent dashboard for goals, retention and correction;
 - tablet-friendly interface;
-- secure application update channel;
-- code signing and notarisation;
-- independent security review;
-- child-safety and safeguarding review;
-- launch-jurisdiction privacy/legal review.
+- code signing/notarisation and secure updates;
+- independent penetration/security review;
+- child-safety, safeguarding and privacy/legal approval;
+- model red-team and measured learning/usability outcomes.
 
-Exit criteria:
+## Stage 6 — Portable multi-device product
 
-- signed builds;
-- independent high-severity findings resolved;
-- safeguarding and privacy launch gates approved;
-- measured educational and usability outcomes.
-
-## Stage 5 — Portable multi-device product
-
-- Android/tablet client using the versioned `.childmind` specification;
-- tested cross-platform schema migrations;
+- Android/tablet implementation of the versioned memory format;
+- tested cross-platform migrations;
 - family-controlled encrypted backup options;
-- model-provider selection;
-- local-model provider where hardware permits;
-- multilingual curriculum and speech support;
-- offline deterministic lessons when AI provider is unavailable.
-
-## Later research
-
-- consented handwriting analysis;
-- pronunciation models;
-- multimodal engagement patterns based on personal baselines;
-- school distribution without surrendering family ownership;
-- privacy-preserving aggregate curriculum improvement;
-- portable learner memory standards and interoperability.
+- provider selection and supported local models;
+- multilingual curriculum and speech;
+- deterministic offline lesson paths;
+- documented interoperability and memory-governance standard.
 
 ## Explicit non-goals for the first prototype
 
 - unrestricted general chatbot;
-- medical or developmental diagnosis;
+- medical, emotional or developmental diagnosis;
 - face recognition;
 - cloud-hosted permanent learner database;
 - school administration platform;
-- competitive leaderboards or manipulative engagement loops;
-- full curriculum before the learner-memory loop is proven.
+- competitive leaderboards or manipulative engagement;
+- full curriculum before the learner-memory loop is validated.
