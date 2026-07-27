@@ -11,7 +11,7 @@ const {
   nextQuestion,
   shouldComplete,
 } = require('./services/lessonEngine.cjs');
-const { MemoryStore } = require('./services/memoryStore.cjs');
+const { MemoryStore } = require('./services/learnerMemoryStore.cjs');
 const { VaultManager } = require('./services/vaultManager.cjs');
 
 let mainWindow;
@@ -253,6 +253,20 @@ function registerIpc() {
   });
 
   registerHandler('learner:dashboard', async (payload) => memoryStore.dashboard(assertLearnerId(payload?.learnerId)));
+  registerHandler('learner:memoryInbox', async (payload) => memoryStore.memoryInbox(assertLearnerId(payload?.learnerId), true));
+  registerHandler('learner:memoryGraph', async (payload) => memoryStore.memoryGraph(assertLearnerId(payload?.learnerId)));
+  registerHandler('learner:archiveMemory', async (payload) => {
+    return memoryStore.archiveMemory(
+      assertLearnerId(payload?.learnerId),
+      assertString(payload?.memoryId, 'Memory ID', 36, 64),
+    );
+  });
+  registerHandler('learner:restoreMemory', async (payload) => {
+    return memoryStore.restoreMemory(
+      assertLearnerId(payload?.learnerId),
+      assertString(payload?.memoryId, 'Memory ID', 36, 64),
+    );
+  });
 
   registerHandler('learner:lock', async (payload) => {
     const learnerId = assertLearnerId(payload?.learnerId);
@@ -293,7 +307,9 @@ function registerIpc() {
   registerHandler('lesson:start', async (payload) => {
     const learnerId = assertLearnerId(payload?.learnerId);
     const dashboard = memoryStore.dashboard(learnerId);
-    const { sessionId } = await memoryStore.startSession(learnerId);
+    const objective = 'Practise addition within 20';
+    const contextPacket = memoryStore.contextPacket(learnerId, objective);
+    const { sessionId } = await memoryStore.startSession(learnerId, objective);
     activeMediaPolicy = {
       audio: Boolean(Number(dashboard.consent.microphone_allowed)),
       video: Boolean(
@@ -308,6 +324,7 @@ function registerIpc() {
       startedQuestionAt: Date.now(),
       currentQuestion: nextQuestion(0),
       dashboard,
+      contextPacket,
       firstMisconception: null,
       usedPersonalisedIntervention: false,
     };
@@ -316,6 +333,7 @@ function registerIpc() {
       sessionId,
       question: lesson.currentQuestion,
       greeting: `Hello ${dashboard.profile.preferred_name}. Today we will practise addition in three short steps.`,
+      memoryContextLoaded: contextPacket.relevantMemories.length,
     };
   });
 
@@ -352,6 +370,7 @@ function registerIpc() {
           question: lesson.currentQuestion.prompt,
           misconception: assessment.misconception,
           successfulStrategy: 'visual counting-on examples',
+          memoryContext: lesson.contextPacket.summaryText,
         });
         explanation = providerResponse.text;
         providerName = providerResponse.provider;
