@@ -110,15 +110,19 @@ function chooseIntervention(assessment, learner = {}) {
 function calculateMastery(evidence) {
   if (!Array.isArray(evidence) || evidence.length === 0) return 0;
   const capped = evidence.slice(-6);
-  const scores = capped.map((item) => {
+  const scored = capped.map((item, index) => {
     let score = item.correct ? 0.5 : 0;
     if (item.independent) score += 0.25;
     if (item.explained) score += 0.1;
     if (item.transfer) score += 0.15;
     if (item.usedHint) score -= 0.15;
-    return Math.max(0, Math.min(1, score));
+    const recencyWeight = index + 1;
+    return { score: Math.max(0, Math.min(1, score)), weight: recencyWeight };
   });
-  let result = Math.round((scores.reduce((sum, value) => sum + value, 0) / scores.length) * 100);
+  const totalWeight = scored.reduce((sum, item) => sum + item.weight, 0);
+  let result = Math.round(
+    (scored.reduce((sum, item) => sum + item.score * item.weight, 0) / totalWeight) * 100,
+  );
   const independentCorrect = capped.filter((item) => item.correct && item.independent).length;
   const independentTransfer = capped.some((item) => item.correct && item.independent && item.transfer);
   if (independentCorrect < 2 || !independentTransfer) result = Math.min(result, 79);
