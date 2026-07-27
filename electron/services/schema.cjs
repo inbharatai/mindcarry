@@ -99,7 +99,6 @@ CREATE TABLE IF NOT EXISTS engagement_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(type);
-CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(active, last_confirmed);
 CREATE INDEX IF NOT EXISTS idx_attempts_session ON attempts(session_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_learner ON sessions(learner_id, started_at);
 `;
