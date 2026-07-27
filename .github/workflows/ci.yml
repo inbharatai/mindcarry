@@ -51,3 +51,16 @@ jobs:
       - name: Verify Windows Electron package layout
         if: runner.os == 'Windows'
         run: npx electron-builder --dir --win --x64
+
+      - name: Create source snapshot for repository audit
+        if: runner.os == 'Linux'
+        run: git archive --format=zip --output=mindcarry-source.zip HEAD
+
+      - name: Upload source snapshot for repository audit
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindcarry-source-audit
+          path: mindcarry-source.zip
+          if-no-files-found: error
+          retention-days: 1
