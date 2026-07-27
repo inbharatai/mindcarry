@@ -29,9 +29,18 @@ function deriveKey(passphrase, salt, options = KDF) {
 }
 
 function parseBase64(value, expectedLength, name, maximumLength = expectedLength) {
-  if (typeof value !== 'string' || value.length === 0) throw new Error(`${name} is missing.`);
+  if (typeof value !== 'string' || value.length === 0 || value.length % 4 !== 0) {
+    throw new Error(`${name} is invalid.`);
+  }
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value)) throw new Error(`${name} is invalid.`);
   const buffer = Buffer.from(value, 'base64');
-  if (buffer.length < expectedLength || buffer.length > maximumLength) throw new Error(`${name} is invalid.`);
+  if (
+    buffer.length < expectedLength ||
+    buffer.length > maximumLength ||
+    buffer.toString('base64') !== value
+  ) {
+    throw new Error(`${name} is invalid.`);
+  }
   return buffer;
 }
 
@@ -59,7 +68,7 @@ async function encryptBuffer(plainBuffer, passphrase, associatedData = '') {
   const key = await deriveKey(passphrase, salt);
   try {
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-    if (associatedData) cipher.setAAD(Buffer.from(associatedData, 'utf8'));
+    if (associatedData) cipher.setAAD(Buffer.from(String(associatedData), 'utf8'));
     const ciphertext = Buffer.concat([cipher.update(plain), cipher.final()]);
     return createEnvelope(ciphertext, salt, iv, cipher.getAuthTag(), KDF);
   } finally {
@@ -68,14 +77,19 @@ async function encryptBuffer(plainBuffer, passphrase, associatedData = '') {
 }
 
 function readEnvelope(envelopeBuffer) {
-  if (!Buffer.isBuffer(envelopeBuffer) || envelopeBuffer.length > MAX_ENCRYPTED_BYTES * 2) {
+  if (!Buffer.isBuffer(envelopeBuffer) || envelopeBuffer.length === 0 || envelopeBuffer.length > MAX_ENCRYPTED_BYTES * 2) {
     throw new Error('Encrypted learner memory has an invalid size.');
   }
+  let envelope;
   try {
-    return JSON.parse(envelopeBuffer.toString('utf8'));
+    envelope = JSON.parse(envelopeBuffer.toString('utf8'));
   } catch {
     throw new Error('Encrypted learner memory is not a valid MindCarry envelope.');
   }
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) {
+    throw new Error('Encrypted learner memory is not a valid MindCarry envelope.');
+  }
+  return envelope;
 }
 
 async function decryptBuffer(envelopeBuffer, passphrase, associatedData = '') {
@@ -101,14 +115,22 @@ async function decryptBuffer(envelopeBuffer, passphrase, associatedData = '') {
         p: Number(envelope.kdf.p),
         maxmem: 128 * 1024 * 1024,
       };
-  if (options.N !== KDF.N || options.r !== KDF.r || options.p !== KDF.p) {
+  if (
+    !Number.isInteger(options.N) ||
+    !Number.isInteger(options.r) ||
+    !Number.isInteger(options.p) ||
+    options.N !== KDF.N ||
+    options.r !== KDF.r ||
+    options.p !== KDF.p ||
+    Number(envelope.kdf?.keyBytes || KEY_BYTES) !== KEY_BYTES
+  ) {
     throw new Error('The learner-memory key settings are not supported.');
   }
 
   const key = await deriveKey(passphrase, salt, options);
   try {
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-    if (associatedData) decipher.setAAD(Buffer.from(associatedData, 'utf8'));
+    if (associatedData) decipher.setAAD(Buffer.from(String(associatedData), 'utf8'));
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   } catch {
@@ -124,10 +146,12 @@ function assertRawKey(key) {
 
 function encryptWithKey(plainBuffer, key, associatedData = '') {
   assertRawKey(key);
+  const plain = Buffer.from(plainBuffer);
+  if (plain.length > 8 * 1024 * 1024) throw new Error('Device catalogue is too large.');
   const iv = crypto.randomBytes(IV_BYTES);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  if (associatedData) cipher.setAAD(Buffer.from(associatedData, 'utf8'));
-  const ciphertext = Buffer.concat([cipher.update(Buffer.from(plainBuffer)), cipher.final()]);
+  if (associatedData) cipher.setAAD(Buffer.from(String(associatedData), 'utf8'));
+  const ciphertext = Buffer.concat([cipher.update(plain), cipher.final()]);
   return Buffer.from(
     JSON.stringify({
       version: 1,
@@ -150,7 +174,7 @@ function decryptWithKey(envelopeBuffer, key, associatedData = '') {
   const tag = parseBase64(envelope.tag, TAG_BYTES, 'Catalogue authentication tag');
   const data = parseBase64(envelope.data, 0, 'Catalogue payload', 8 * 1024 * 1024);
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  if (associatedData) decipher.setAAD(Buffer.from(associatedData, 'utf8'));
+  if (associatedData) decipher.setAAD(Buffer.from(String(associatedData), 'utf8'));
   decipher.setAuthTag(tag);
   try {
     return Buffer.concat([decipher.update(data), decipher.final()]);
@@ -171,11 +195,14 @@ function safeHashEqual(first, second) {
 }
 
 module.exports = {
+  MAX_ENCRYPTED_BYTES,
   decryptBuffer,
   decryptWithKey,
   deriveKey,
   encryptBuffer,
   encryptWithKey,
+  parseBase64,
+  readEnvelope,
   safeHashEqual,
   sha256,
 };
