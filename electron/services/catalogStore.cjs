@@ -25,7 +25,10 @@ class CatalogStore {
 
   read() {
     const key = this.getDeviceKey();
-    if (!key) throw new Error('Secure device storage is unavailable. MindCarry cannot open the learner catalogue safely.');
+    if (!key) {
+      if (!fs.existsSync(this.filePath)) return [];
+      throw new Error('Secure device storage is unavailable. MindCarry cannot open the encrypted learner catalogue safely.');
+    }
     try {
       if (!fs.existsSync(this.filePath)) return [];
       const plain = decryptWithKey(fs.readFileSync(this.filePath), key, CATALOG_AAD);
