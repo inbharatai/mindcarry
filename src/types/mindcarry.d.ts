@@ -28,7 +28,7 @@ declare global {
       lessons: {
         start: (learnerId: string) => Promise<LessonStart>;
         answer: (payload: LessonAnswerPayload) => Promise<LessonReply>;
-        cancel: (sessionId: string) => Promise<{ ok: boolean }>;
+        cancel: (sessionId: string) => Promise<{ ok: boolean; status?: string }>;
       };
     };
   }
@@ -48,6 +48,7 @@ declare global {
     model: string;
     hasGeminiKey: boolean;
     secureStorageAvailable: boolean;
+    secureStorageBackend: string;
     vault: VaultStatus;
   }
 
@@ -144,6 +145,10 @@ declare global {
     graphEdgeCount: number;
   }
 
+  interface ContextMemory extends MemoryInboxItem {
+    relevanceScore: number;
+  }
+
   interface MemoryGraphNode {
     nodeId: string;
     kind: string;
@@ -176,8 +181,6 @@ declare global {
     edges: MemoryGraphEdge[];
   }
 
-  interface ContextMemory extends MemoryInboxItem {}
-
   interface ContextSkill {
     skillId: string;
     domain: string;
@@ -191,11 +194,14 @@ declare global {
 
   interface ContextGraphFact {
     source: string;
+    sourceKind: string;
     relation: string;
     target: string;
+    targetKind: string;
     confidence: number;
     evidenceCount: number;
     provenance: 'EXTRACTED' | 'DERIVED' | 'PARENT';
+    relevanceScore: number;
   }
 
   interface LearnerContextPacket {
@@ -213,6 +219,7 @@ declare global {
     relevantMemories: ContextMemory[];
     graphFacts: ContextGraphFact[];
     summaryText: string;
+    providerText: string;
   }
 
   interface Dashboard {
