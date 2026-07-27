@@ -1,188 +1,147 @@
 # Privacy model
 
-MindCarry is local-first. It is not fully offline when Gemini is enabled.
+MindCarry is local-first. It is not fully offline when Gemini is enabled. This describes the implemented pre-MVP technical boundary, not a complete privacy notice or legal opinion.
 
-This document describes the implemented pre-MVP technical boundary, not a complete legal privacy policy.
+## Local learner data
 
-## Data categories
+The encrypted learner database may contain:
 
-### Profile data
-
-- preferred name;
-- age;
-- preferred language;
-- interests;
-- parent goal.
-
-### Learning evidence
-
-- question and answer;
-- correctness;
-- independence and hint use;
-- response time;
-- simple misconception classification;
-- teaching intervention;
-- reasoning observation;
-- mastery score;
-- session summary and recommendation.
-
-### Memory Inbox data
-
-- bounded memory observation;
-- memory type;
-- confidence;
-- evidence count;
-- source lesson;
-- created and last-confirmed dates;
-- active or archived state;
-- memory lifecycle events.
-
-### Local learner-graph data
-
-- learner, skill, interest, memory and session nodes;
-- explained relations between nodes;
-- edge confidence and evidence count;
-- source memory and source session;
-- provenance: extracted, deterministically derived or future parent-confirmed.
-
-### Optional observable cue
-
-- one numeric movement-intensity value calculated locally from camera frames.
-
-The movement value is not an emotion, diagnosis, identity or biometric template.
-
-## Local storage boundary
-
-The following are stored inside the encrypted learner database:
-
-- profile data;
+- preferred name, age, language, interests and parent goal;
 - consent choices;
-- learning evidence;
-- session history;
-- structured learner memories;
-- Memory Inbox archive state;
-- memory-event audit history;
-- local graph nodes and edges;
-- optional consented engagement events.
+- questions, answers, correctness, hint use and response time;
+- misconception/intervention/reasoning observations;
+- mastery, session summaries and recommendations;
+- Memory Inbox content, confidence, evidence and archive state;
+- memory lifecycle events;
+- graph nodes, edges, source and provenance;
+- optional consented numeric movement events.
 
-The database is encrypted with the parent passphrase before being written to disk. The graph is not stored in a cloud graph database and no external graph service is required.
+The database is encrypted before disk persistence. A small plaintext technical manifest contains no child name, age, interest, goal, lesson, memory or graph content.
 
-The local learner list is stored in a separate encrypted catalogue protected by an operating-system-backed device key.
+## Encrypted device catalogue
 
-## Plaintext technical metadata
+The home-screen learner list is stored in `learner-catalog.enc`. A random device key is protected by Electron `safeStorage`.
 
-A small technical manifest remains readable before decryption so MindCarry can validate and migrate the encrypted file. It contains no child name, age, interest, parent goal, inbox item or graph content.
+MindCarry rejects:
 
-It may contain:
+- unavailable credential storage;
+- Linux `basic_text`;
+- unknown Linux backend.
 
-- format and schema version;
-- random learner UUID;
-- timestamps;
-- encryption identifier;
-- encrypted-file hash.
+On Windows, the expected target backend is DPAPI. This must be confirmed on the founder’s device.
 
-## Provider-independent context selection
+## Context selection
 
-Before an AI-backed lesson, MindCarry creates a bounded Learner Context Packet locally. The current limits are:
+Before an AI-backed explanation, MindCarry ranks active local evidence using:
 
-- a small set of current skills;
-- up to eight active relevant memory items;
-- up to twelve explained graph facts;
-- a short summary capped before it reaches the provider adapter.
+- objective and skill overlap;
+- memory type;
+- evidence count;
+- confidence;
+- recency;
+- review state.
 
-Archived memory items are not included. The canonical evidence, Inbox and graph remain local even when a provider changes.
+The current caps are eight memories, twelve graph facts and 1,800 provider-context characters.
+
+The parent-visible `summaryText` and provider-safe `providerText` are separate. The provider-safe graph replaces learner-node identity with `Learner`.
 
 ## Gemini boundary
 
-Gemini is optional. Demo mode does not require an AI API.
+Gemini is optional. Demo mode uses no AI API.
 
-When Gemini is enabled, MindCarry may send only the information required to phrase one short reteaching explanation:
+When enabled, a request may contain:
 
-- current maths question;
 - learner age;
+- current maths question;
 - one relevant interest;
 - current misconception;
 - one teaching strategy;
-- selected bounded active-memory context.
+- selected active memory and graph context.
 
-The implementation does not send:
+It does not contain:
 
-- complete learner database;
-- complete Memory Inbox;
-- complete graph;
+- child preferred name;
+- complete learner profile/database;
+- complete Memory Inbox or graph;
 - complete session history;
-- encrypted database file;
 - parent passphrase;
 - API key as prompt content;
-- raw camera video;
+- raw camera frames/video;
 - raw microphone audio;
 - device catalogue;
 - `.childmind` package.
 
-Memory context is explicitly treated as fallible evidence, not a diagnosis or permanent label. Third-party-provider processing remains subject to the provider account and API terms chosen by the parent/tester. Local encryption cannot control data after an approved request is sent to that provider.
+Selected interests and learning observations are still personal data after an approved provider request. Local encryption cannot control provider processing after transmission. Provider use remains subject to the tester’s account, project and API terms.
 
-## Gemini API key
+## Gemini test key
 
 The key is:
 
-- entered in the local Settings screen;
-- tested before Gemini mode is enabled;
-- encrypted using Electron `safeStorage`;
-- stored outside learner directories;
-- omitted from logs and exports by design.
+- entered only in the local masked Settings field;
+- tested before Gemini mode activates;
+- stored in the main process through accepted OS credential protection;
+- outside learner folders;
+- excluded from logs and exports by design;
+- removable through Settings.
 
-The key must never be committed to GitHub, placed in `.env`, pasted into chat or included in screenshots.
+Never commit or paste a key into GitHub, source, `.env`, logs, screenshots, chat or learner exports.
 
 ## Camera and microphone
 
-- microphone permission is associated with the selected learner consent;
-- camera permission is off by default;
-- local behaviour analysis requires a separate enabled consent flag;
-- media permission is enabled only during an active lesson;
-- raw audio and raw video storage are forced off in the current implementation;
-- camera frames remain in renderer memory and are not uploaded by the camera module;
-- only a clamped movement value may be stored.
+- microphone follows selected learner consent and has typed fallback;
+- camera is off by default;
+- local movement analysis needs both camera and local-analysis consent;
+- media is permitted only during an active lesson;
+- camera frames remain in renderer memory;
+- only a clamped numeric movement value may be stored;
+- tracks stop on cancellation, lock, unmount and startup/play error;
+- raw audio/video storage is forced off;
+- no face recognition, biometric template, identity inference or emotion/condition diagnosis.
 
-## Parent controls currently available
+## Parent controls implemented
 
-- choose camera consent at learner creation;
-- choose a parent passphrase;
-- lock the learner database;
-- open the Memory Inbox;
-- see confidence, evidence count and source lesson;
-- inspect explained graph relationships and provenance;
+- choose passphrase and camera consent at learner creation;
+- unlock/lock the learner database;
+- view Memory Inbox, confidence, evidence and source;
+- view explained graph relations/provenance;
 - archive a memory from future context;
-- restore an archived memory;
-- download the complete encrypted learner package;
-- import the package on another supported installation;
-- remove the Gemini key;
+- restore it explicitly;
+- download/import encrypted complete memory;
+- remove Gemini key;
 - use deterministic demo mode;
-- view stored session summaries.
+- inspect session summaries and provider-context preview.
 
-## Parent controls still required before public release
+Reinforcing evidence does not automatically reactivate an archived memory.
 
-- edit or correct a stored memory;
-- permanently delete individual memories with a defined secure-erasure workflow;
-- delete the complete learner and confirm removal;
-- configure retention periods;
-- change or recover a passphrase;
-- verify an export before deleting a local copy;
-- explicit transcript-retention controls in the UI;
-- review and confirm future parent-authored graph relationships;
-- clear data-use and provider disclosures suitable for launch jurisdictions.
+## Parent controls not yet implemented
 
-## Portability
+- edit/correct a memory;
+- permanent individual-memory deletion with secure-erasure semantics;
+- complete learner deletion;
+- retention-period configuration;
+- passphrase change or recovery;
+- verified backup/restore UI;
+- parent-confirmed graph relations;
+- full transcript-retention controls;
+- downloadable human-readable data report.
 
-A `.childmind` package contains the already-encrypted learner database and non-personal technical metadata. Because the Inbox, memory-event ledger and graph are inside that database, they travel in the same package without exposing a separate graph file.
+## `.childmind` portability
 
-The original parent passphrase is required on the receiving installation. The receiving device creates its own encrypted learner catalogue after successful unlock. Device credentials and Gemini keys do not travel with the learner package.
+The package contains the already-encrypted learner database, a non-personal technical manifest and checksum. It carries Inbox, graph and audit history without a separate graph service.
 
-After import and unlock, MindCarry applies schema migrations, verifies the database, rebuilds the deterministic graph and creates a fresh local context packet.
+Import validates size, versions, schema, UUID, canonical base64 and checksum. The receiving installation displays **Imported learner** until the original passphrase verifies the profile. Gemini/device keys do not travel.
 
 ## Analytics
 
-No product analytics service is configured in the current repository. Child data, transcripts, camera signals, Memory Inbox contents and learner-graph data are not sent to an analytics provider by the implementation.
+No product analytics provider is configured in this repository. Learner profile, lesson data, Inbox, graph and movement events are not intentionally sent to analytics by the implementation.
 
-## Legal and safeguarding boundary
+## Residual privacy limitations
 
-Before use beyond controlled founder-led testing, MindCarry requires jurisdiction-specific privacy, parental-consent, child-safety, safeguarding, model-behaviour and data-retention review. Repository-level technical controls are necessary but not sufficient for compliance.
+- passphrase/decrypted database exist in main-process memory while unlocked;
+- selected provider context is external personal-data processing;
+- no retention/deletion policy or full parent deletion UI yet;
+- no independent child-privacy/security/legal review;
+- no public-production incident process;
+- target-device permission/backend behaviour is not yet evidenced.
+
+Before use beyond controlled founder testing, MindCarry requires jurisdiction-specific parental-consent, privacy, child-safety, safeguarding and retention review.
