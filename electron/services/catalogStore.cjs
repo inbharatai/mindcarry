@@ -29,13 +29,15 @@ class CatalogStore {
       if (!fs.existsSync(this.filePath)) return [];
       throw new Error('Secure device storage is unavailable. MindCarry cannot open the encrypted learner catalogue safely.');
     }
+    let plain;
     try {
       if (!fs.existsSync(this.filePath)) return [];
-      const plain = decryptWithKey(fs.readFileSync(this.filePath), key, CATALOG_AAD);
+      plain = decryptWithKey(fs.readFileSync(this.filePath), key, CATALOG_AAD);
       const parsed = JSON.parse(plain.toString('utf8'));
       if (!Array.isArray(parsed)) throw new Error('Catalogue data is invalid.');
       return parsed.map(sanitiseEntry);
     } finally {
+      plain?.fill(0);
       key.fill(0);
     }
   }
@@ -43,12 +45,15 @@ class CatalogStore {
   write(entries) {
     const key = this.getDeviceKey();
     if (!key) throw new Error('Secure device storage is unavailable. MindCarry cannot protect learner names safely.');
+    let serialised;
     try {
       const normalised = entries.map(sanitiseEntry);
-      const encrypted = encryptWithKey(Buffer.from(JSON.stringify(normalised), 'utf8'), key, CATALOG_AAD);
+      serialised = Buffer.from(JSON.stringify(normalised), 'utf8');
+      const encrypted = encryptWithKey(serialised, key, CATALOG_AAD);
       this.atomicWrite(this.filePath, encrypted);
       return normalised;
     } finally {
+      serialised?.fill(0);
       key.fill(0);
     }
   }
