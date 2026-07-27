@@ -37,5 +37,14 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Run full verification
-        run: npm run check
+      - name: Lint secure main-process code
+        run: npm run lint
+
+      - name: Run dependency-free smoke test
+        run: npm run test:core
+
+      - name: Run unit and integration tests
+        run: npm test
+
+      - name: Type-check and build renderer
+        run: npm run build
