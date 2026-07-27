@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
 const { CatalogStore } = require('../electron/services/catalogStore.cjs');
-const { MemoryStore } = require('../electron/services/memoryStore.cjs');
+const { MemoryStore } = require('../electron/services/learnerMemoryStore.cjs');
 const { VaultManager } = require('../electron/services/vaultManager.cjs');
 const temporaryRoots: string[] = [];
 
@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 describe('encrypted learner memory', () => {
-  it('creates, persists, reopens, exports and imports a learner', async () => {
+  it('creates, graphs, archives, persists, exports and imports a learner', async () => {
     const firstRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mindcarry-store-a-'));
     const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'mindcarry-store-b-'));
     temporaryRoots.push(firstRoot, secondRoot);
@@ -59,6 +59,10 @@ describe('encrypted learner memory', () => {
     expect(fs.readFileSync(learnerPaths.database, 'utf8')).not.toContain('Aarav');
 
     await first.store.open(manifest.learnerId, 'a-strong-parent-passphrase');
+    const initialDashboard = first.store.dashboard(manifest.learnerId);
+    expect(initialDashboard.memoryGraph.nodes.some((node: { kind: string }) => node.kind === 'learner')).toBe(true);
+    expect(initialDashboard.memoryGraph.nodes.some((node: { kind: string }) => node.kind === 'interest')).toBe(true);
+
     const { sessionId } = await first.store.startSession(manifest.learnerId);
     await first.store.recordAttempt(manifest.learnerId, {
       sessionId,
@@ -80,11 +84,25 @@ describe('encrypted learner memory', () => {
       nextRecommendation: 'Review counting on.',
       memories: [{ type: 'skill', content: 'Completed a transfer question independently.', confidence: 0.75 }],
     });
-    expect(completed.memories).toHaveLength(1);
-    first.store.close(manifest.learnerId);
 
+    expect(completed.memories).toHaveLength(1);
+    expect(completed.memoryInbox).toHaveLength(1);
+    expect(completed.memoryGraph.nodes.some((node: { kind: string }) => node.kind === 'memory')).toBe(true);
+    expect(completed.memoryGraph.edges.some((edge: { relation: string }) => edge.relation === 'SHOWED_SKILL_EVIDENCE')).toBe(true);
+    expect(completed.contextPacket.summaryText).toContain('Completed a transfer question independently.');
+
+    const memoryId = completed.memoryInbox[0].memoryId;
+    const archived = await first.store.archiveMemory(manifest.learnerId, memoryId);
+    expect(archived.memoryInbox[0].active).toBe(false);
+    expect(archived.contextPacket.relevantMemories).toHaveLength(0);
+    const restoredDashboard = await first.store.restoreMemory(manifest.learnerId, memoryId);
+    expect(restoredDashboard.memoryInbox[0].active).toBe(true);
+
+    first.store.close(manifest.learnerId);
     await first.store.open(manifest.learnerId, 'a-strong-parent-passphrase');
-    expect(first.store.dashboard(manifest.learnerId).recentSessions).toHaveLength(1);
+    const reopened = first.store.dashboard(manifest.learnerId);
+    expect(reopened.recentSessions).toHaveLength(1);
+    expect(reopened.memoryGraph.nodes.some((node: { kind: string }) => node.kind === 'memory')).toBe(true);
     first.store.close(manifest.learnerId);
 
     const exported = path.join(firstRoot, 'Aarav.childmind');
@@ -98,6 +116,9 @@ describe('encrypted learner memory', () => {
     const restored = second.store.dashboard(imported.learnerId);
     expect(restored.profile.preferred_name).toBe('Aarav');
     expect(restored.recentSessions).toHaveLength(1);
+    expect(restored.memoryInbox).toHaveLength(1);
+    expect(restored.memoryGraph.edges.length).toBeGreaterThan(0);
+    expect(restored.contextPacket.summaryText).toContain('Completed a transfer question independently.');
     second.store.closeAll();
   }, 30_000);
 });
