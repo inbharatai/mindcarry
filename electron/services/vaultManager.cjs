@@ -101,23 +101,39 @@ class VaultManager {
 
   atomicWrite(filePath, data) {
     const resolved = path.resolve(filePath);
-    this.ensureDirectory(path.dirname(resolved));
+    const destinationDirectory = path.dirname(resolved);
+    this.ensureDirectory(destinationDirectory);
     const temporary = path.join(
-      this.tempDir,
-      `${path.basename(resolved)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`,
+      destinationDirectory,
+      `.${path.basename(resolved)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`,
     );
-    const descriptor = fs.openSync(temporary, 'w', FILE_MODE);
+    let descriptor;
     try {
+      descriptor = fs.openSync(temporary, 'wx', FILE_MODE);
       fs.writeFileSync(descriptor, data);
       fs.fsyncSync(descriptor);
-    } finally {
       fs.closeSync(descriptor);
-    }
-    fs.renameSync(temporary, resolved);
-    try {
-      fs.chmodSync(resolved, FILE_MODE);
-    } catch {
-      // See Windows ACL note in ensureDirectory.
+      descriptor = undefined;
+      fs.renameSync(temporary, resolved);
+      try {
+        fs.chmodSync(resolved, FILE_MODE);
+      } catch {
+        // See Windows ACL note in ensureDirectory.
+      }
+    } catch (error) {
+      if (descriptor !== undefined) {
+        try {
+          fs.closeSync(descriptor);
+        } catch {
+          // Best effort.
+        }
+      }
+      try {
+        fs.rmSync(temporary, { force: true });
+      } catch {
+        // Best effort.
+      }
+      throw error;
     }
   }
 
