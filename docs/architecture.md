@@ -1,267 +1,181 @@
 # Architecture
 
-MindCarry is currently a desktop-first, local-memory prototype. The Electron main process owns every privileged operation. The React renderer is treated as untrusted presentation code and receives only a narrow capability API through the preload bridge.
+MindCarry is a desktop-first, local-memory pre-MVP. The Electron main process owns every privileged operation. The React renderer is untrusted presentation code and receives only named capabilities through the preload bridge.
 
 ## System overview
 
 ```mermaid
 flowchart TB
-    CHILD[Child and parent]
-    RENDERER[React renderer]
-    INBOXUI[Memory Inbox and learning-map view]
-    PRELOAD[Restricted preload bridge]
+    FAMILY[Child and parent]
+    RENDERER[Sandboxed React renderer]
+    PRELOAD[Restricted preload API]
     MAIN[Electron main process]
     LESSON[Deterministic lesson engine]
-    CONTEXT[Bounded context builder]
-    PROVIDER[Demo or Gemini provider]
-    VAULT[VaultManager]
-    CATALOG[Encrypted CatalogStore]
-    MEMORY[Encrypted MemoryStore]
-    GRAPH[Embedded local learner graph]
-    OS[OS credential protection]
+    STORE[Encrypted persistence store]
+    INBOX[Memory Inbox and lifecycle events]
+    GRAPH[Deterministic local graph]
+    SELECT[Ranked context selector]
+    PROVIDER[Demo or Gemini adapter]
+    VAULT[Automatic local vault]
+    CATALOG[Encrypted device catalogue]
+    OS[Accepted OS credential backend]
 
-    CHILD --> RENDERER
-    RENDERER --> INBOXUI
-    RENDERER --> PRELOAD
-    PRELOAD --> MAIN
-    MAIN --> LESSON
-    MAIN --> CONTEXT
-    CONTEXT --> PROVIDER
-    MAIN --> VAULT
-    MAIN --> CATALOG
-    MAIN --> MEMORY
-    MEMORY --> GRAPH
-    GRAPH --> CONTEXT
+    FAMILY --> RENDERER --> PRELOAD --> MAIN
+    MAIN --> LESSON --> STORE
+    STORE --> INBOX --> GRAPH --> SELECT
+    MAIN --> SELECT
+    SELECT --> PROVIDER
+    STORE --> VAULT
+    CATALOG --> VAULT
     CATALOG --> OS
-    PROVIDER -. bounded task context .-> GEMINI[Gemini API]
+    PROVIDER -. bounded de-identified task context .-> GEMINI[Gemini API]
 ```
 
-## Trust boundaries
-
-### Renderer
+## Renderer boundary
 
 Responsibilities:
 
-- child and parent interface;
-- typed lesson interaction;
-- browser/OS speech recognition;
-- optional camera frame processing;
-- rendering local progress, Memory Inbox and graph summaries returned by the main process.
+- parent and child interface;
+- typed input;
+- supported browser/OS speech recognition and speech synthesis;
+- optional local camera-frame movement calculation;
+- rendering progress, Memory Inbox, graph and parent-visible context.
 
 Restrictions:
 
-- no Node.js integration;
-- no direct filesystem access;
-- no direct Electron APIs;
-- no direct access to API keys;
-- no direct learner-database access;
-- no arbitrary IPC channel selection.
+- no Node integration or direct filesystem access;
+- no direct Electron/key/database access;
+- no arbitrary IPC channel;
+- no external renderer network connection;
+- production DevTools disabled;
+- arbitrary navigation/new windows denied.
 
-### Preload bridge
+IPC is accepted only from the exact configured development origin or the exact packaged `dist/index.html` file.
 
-`electron/preload.cjs` exposes named methods only:
+## Preload API
 
-- application status and vault-folder opening;
-- Gemini key management;
-- learner create/list/unlock/lock/export/import;
-- Memory Inbox and graph reads;
-- memory archive and restore controls;
+`electron/preload.cjs` exposes only:
+
+- app status and vault-folder opening;
+- Gemini-key set/remove/test;
+- learner list/create/unlock/dashboard/lock/export/import;
+- Inbox/graph read and memory archive/restore;
 - lesson start/answer/cancel.
 
-It does not expose `ipcRenderer`, filesystem, shell or arbitrary channel access.
+The bridge does not expose `ipcRenderer`, shell, filesystem or arbitrary invocation.
 
-### Electron main process
+## Main-process responsibilities
 
-Responsibilities:
-
-- IPC sender validation;
-- input validation;
-- media permission policy;
-- vault creation;
-- encryption and decryption;
-- learner-database lifecycle;
-- device catalogue protection;
-- Memory Inbox and graph orchestration;
-- bounded provider-independent context selection;
-- model credential handling;
-- Gemini requests;
-- import/export dialogs;
-- session state.
-
-The main process is the only process allowed to write learner files, open the decrypted learner database or obtain the Gemini API key.
+- validate renderer sender and all arguments;
+- create/manage vault and encrypted catalogue;
+- accept only secure OS credential backends;
+- encrypt/decrypt learner databases;
+- enforce session ownership, one active lesson and one answer operation at a time;
+- assess answers and mastery deterministically;
+- build Inbox, graph and ranked context;
+- store/test Gemini key and perform optional provider requests;
+- control media permissions;
+- validate import/export paths and package structure.
 
 ## Learner Memory layers
 
-### Canonical evidence ledger
+### 1. Evidence ledger
 
-The permanent source of truth is structured lesson evidence:
+Canonical structured data includes profile, consent, skills, sessions, attempts, misconceptions, interventions, transfer outcomes and optional consented movement events.
 
-- profile and consent;
-- skills and mastery;
-- lesson sessions;
-- attempts and misconceptions;
-- intervention and transfer outcomes;
-- optional consented engagement events.
+The model cannot decide correctness, advance lesson state or write permanent data directly.
 
-A model does not directly decide correctness, lesson progression or permanent database writes.
+### 2. Memory Inbox
 
-### Memory Inbox
+The parent-visible `memories` view includes content, type, confidence, evidence count, source, dates and active/archive state. Archiving excludes the item from future context. Repeated evidence may reinforce it but does not reactivate it. Restore is explicit.
 
-The `memories` table presents bounded observations derived from validated evidence. The parent-facing Inbox includes confidence, evidence count, source lesson, confirmation date and active/archived state.
+### 3. Lifecycle ledger
 
-Archiving an item excludes it from future context without destroying the audit trail. Restoration makes it eligible again. Editing and permanent deletion remain future release gates.
+`memory_events` records creation, reinforcement, archive and restore. Graph/event mutation is transactional before encrypted persistence.
 
-### Memory event ledger
+### 4. Local graph
 
-`memory_events` records material lifecycle events such as:
+`memory_graph_nodes` and `memory_graph_edges` are inside the encrypted SQLite database. Nodes represent learner, skill, interest, memory and session. Edges store relation, confidence, evidence count, source and provenance.
 
-- created;
-- reinforced;
-- archived;
-- restored.
+The graph is deterministic and rebuildable; it is not a cloud service or canonical vector index.
 
-This supports auditability and future parent controls without relying on an AI-generated narrative history.
+### 5. Ranked context packet
 
-### Embedded local learner graph
+Before each lesson, MindCarry ranks active memory and graph facts using objective/skill overlap, memory type, evidence, confidence, recency and review state.
 
-The graph is stored in the same encrypted SQLite database through:
+Limits:
 
-- `memory_graph_nodes`;
-- `memory_graph_edges`.
+```text
+8 memories
+12 graph facts
+1,800 provider-context characters
+```
 
-Node kinds currently include learner, skill, interest, memory and session. Edges record relation, confidence, evidence count, source memory/session and provenance.
+Two views are produced:
 
-Provenance values are:
+- `summaryText` — parent-visible local preview;
+- `providerText` — bounded provider-safe view where learner-node identity is replaced with `Learner`.
 
-- `EXTRACTED` — directly represented in canonical records;
-- `DERIVED` — created by deterministic application rules;
-- `PARENT` — reserved for future parent-confirmed relationships.
+The provider receives the current task plus `providerText`, age and at most one relevant interest. It does not receive the child name, complete DB/graph, passphrase, API key, raw media or export.
 
-The graph is deterministic and rebuildable. It is not a separate cloud graph database and does not require a vector store.
+## Credential protection
 
-### Decrypted-memory lifetime
+The catalogue and Gemini key use Electron `safeStorage`. MindCarry rejects unavailable, Linux `basic_text` and unknown backends. On Windows, the target backend is DPAPI. Device credentials never travel in `.childmind`.
 
-Each learner database is created as SQLite in memory, exported to bytes and encrypted before disk persistence. The decrypted database exists only in Electron main-process memory while the learner is unlocked.
-
-## Encrypted device catalogue
-
-The home screen requires learner names before a parent unlocks a database. Those names are stored in `learner-catalog.enc`, not in plaintext manifests.
-
-The catalogue uses a random 256-bit device key. Electron `safeStorage` protects the key using operating-system credential protection. The catalogue is device-specific and never exported.
-
-## AI-provider boundary
-
-The provider abstraction currently supports:
-
-- deterministic local demo explanations;
-- Gemini-generated short alternative explanations.
-
-Before a lesson, MindCarry creates a bounded Learner Context Packet containing:
-
-- current objective;
-- a small set of skills;
-- at most eight active relevant memory items;
-- at most twelve graph facts;
-- a short text summary.
-
-The provider receives only selected context for the current task. The complete database, graph, passphrase and `.childmind` package are not supplied. The AI provider does not own lesson state, mastery logic or persistent memory, and its output cannot execute code or write directly to the database.
-
-## Startup sequence
-
-1. Electron reaches `app.whenReady()`.
-2. `VaultManager` creates the complete runtime structure.
-3. A device catalogue key is loaded or generated through `safeStorage`.
-4. `CatalogStore` opens the encrypted learner list.
-5. The encrypted persistence store loads SQL.js and performs legacy-manifest migration.
-6. The secure BrowserWindow is created.
-7. Media-permission and IPC handlers are registered.
-8. The renderer requests status and the encrypted learner list.
-
-## Learner creation sequence
+## Learner creation
 
 ```mermaid
 sequenceDiagram
     participant P as Parent UI
     participant M as Main process
-    participant V as VaultManager
+    participant V as Vault
     participant DB as In-memory SQLite
-    participant G as Local graph builder
     participant C as Encrypted catalogue
 
-    P->>M: Profile + consent + parent passphrase
-    M->>M: Validate fields and consent
+    P->>M: Validated profile, consent and passphrase
     M->>V: Create UUID learner structure
-    M->>DB: Create schema and learner records
-    M->>G: Build learner, skill and interest graph
-    M->>M: Export and encrypt DB bytes
-    M->>V: Atomic write learner.db.enc
-    M->>V: Write non-personal manifest
-    M->>C: Add encrypted learner-list entry
+    M->>DB: Transaction: profile, consent, initial skill
+    M->>DB: Build initial deterministic graph
+    M->>M: Export and AES-GCM encrypt bytes
+    M->>V: Backup/atomic write learner.db.enc
+    M->>V: Write non-personal technical manifest
+    M->>C: Write encrypted catalogue entry
     M-->>P: Learner created
 ```
 
-Any failure removes the incomplete learner structure.
+Incomplete learner structures are removed after failure.
 
-## Lesson orchestration
+## Lesson lifecycle
 
-The current lesson is a deterministic three-stage vertical slice:
+1. Cancel a previous active lesson for that learner.
+2. Build ranked context before the new session.
+3. Create one active session.
+4. Parse the final numeric answer from typed/spoken text.
+5. Assess correctness, independence, hint use and misconception.
+6. Optionally request short Gemini wording using provider-safe context.
+7. Persist the attempt transactionally and atomically.
+8. Require an independent transfer answer before completion.
+9. Update mastery/memory transactionally.
+10. Record lifecycle events, rebuild graph and persist encrypted bytes.
 
-1. concrete addition question;
-2. pictorial recheck;
-3. independent transfer question.
+A main-process processing flag prevents concurrent duplicate answer handling. Renderer unmount/lock/cancel cleanup ends unfinished sessions and media.
 
-The main process:
+## Persistence
 
-- builds the current bounded Learner Context Packet;
-- timestamps the question;
-- parses and assesses the answer;
-- identifies a simple misconception;
-- selects an intervention;
-- optionally asks Gemini for child-safe wording grounded in selected context;
-- falls back to deterministic wording on model failure;
-- records the attempt;
-- updates mastery only after transfer evidence;
-- writes structured memories at session completion;
-- records memory lifecycle events;
-- rebuilds the local graph;
-- persists the complete encrypted database.
+SQL.js runs in main-process memory while unlocked. Each material update exports database bytes, encrypts them, rotates the previous encrypted file into backups, writes a destination-local temporary file, flushes and atomically renames it.
 
-## Data persistence
-
-A learner remains unlocked in the main process during the active parent/child session. Every material database update exports and encrypts the current database, rotates an encrypted backup and atomically replaces the main encrypted file.
-
-A future optimisation may batch writes, but correctness and crash resilience are prioritised in the pre-MVP.
+Unlock requires authenticated decryption, supported schema, SQLite integrity, one matching profile and a matching consent record.
 
 ## Media boundary
 
-Camera frames remain inside the renderer. The current experiment computes a numeric movement value and sends only that number with a lesson answer when both camera and local-behaviour-analysis consent are enabled.
-
-The main process grants media permission only during the active learner lesson and only for consented media types.
+Camera permission is off by default and active only during a consented lesson. Frames remain in renderer memory; only a clamped movement number may be stored. Streams stop on cancel, lock, unmount and startup/play error. Raw audio/video storage is forced off.
 
 ## Portability
 
-A `.childmind` package contains:
+A `.childmind` package contains an already-encrypted database, technical manifest and checksum. Import validates total/payload size, package/manifest/schema versions, UUID, canonical base64, checksum and destination collision before writing.
 
-- package format/version;
-- non-personal technical manifest;
-- already-encrypted learner database;
-- integrity checksum.
-
-Because the Inbox, memory-event ledger and graph are inside the encrypted database, they travel automatically without a separate graph file or cloud account.
-
-The receiving installation:
-
-1. validates size, format, version, UUID and checksum;
-2. creates the learner folder automatically;
-3. copies the encrypted database atomically;
-4. lists it as **Imported learner**;
-5. asks for the original parent passphrase;
-6. verifies database integrity and learner identity;
-7. applies schema migrations;
-8. rebuilds the deterministic graph;
-9. creates a fresh bounded context packet;
-10. updates the receiving device’s encrypted catalogue with the verified profile.
+After passphrase unlock the receiving installation verifies database identity, migrates schema, rebuilds graph and creates fresh context. It initially displays **Imported learner** and never imports Gemini/device keys.
 
 ## Web-hosting boundary
 
-Vercel or Cloudflare may later host a public website, waitlist, documentation or controlled browser demonstration. They are not part of the current learner-memory runtime. A normal website cannot replace the local encrypted desktop storage model without an explicit cloud-privacy redesign.
+A public website may host product information or a controlled demo, but it is not the current learner-memory runtime. Moving canonical memory to Vercel, Cloudflare or another cloud would require an explicit privacy/security redesign.
