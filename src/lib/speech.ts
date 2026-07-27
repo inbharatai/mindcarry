@@ -25,18 +25,19 @@ const LANGUAGE_CODES: Record<string, string> = {
   punjabi: 'pa-IN',
 };
 
-function languageCode(language?: string) {
+export function languageCode(language?: string) {
   const value = String(language || 'English').trim();
   if (/^[a-z]{2,3}-[A-Z]{2}$/.test(value)) return value;
   return LANGUAGE_CODES[value.toLowerCase()] || 'en-IN';
 }
 
-export function speak(text: string, rate = 0.92): void {
+export function speak(text: string, rate = 0.92, language = 'English'): void {
   if (!('speechSynthesis' in window)) return;
   const clean = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 1000);
   if (!clean) return;
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(clean);
+  utterance.lang = languageCode(language);
   utterance.rate = Math.max(0.65, Math.min(1.15, rate));
   utterance.pitch = 1.02;
   window.speechSynthesis.speak(utterance);
@@ -60,6 +61,12 @@ export function listenOnce(
 
   const recognition = new Recognition();
   let ended = false;
+  const finish = () => {
+    if (ended) return;
+    ended = true;
+    onEnd();
+  };
+
   recognition.lang = languageCode(language);
   recognition.interimResults = false;
   recognition.continuous = false;
@@ -74,31 +81,33 @@ export function listenOnce(
       onError('Microphone permission was not granted. Type the answer or ask a parent to review permissions.');
     } else if (event.error === 'no-speech') {
       onError('No speech was detected. Try once more or type the answer.');
+    } else if (event.error === 'audio-capture') {
+      onError('No working microphone was detected. Type the answer and continue.');
     } else {
       onError('Speech recognition could not complete. Type the answer and continue.');
     }
   };
-  recognition.onend = () => {
-    if (ended) return;
-    ended = true;
-    onEnd();
-  };
+  recognition.onend = finish;
 
   try {
     recognition.start();
   } catch {
     onError('Speech recognition could not start. Type the answer and continue.');
+    finish();
     return null;
   }
 
   return () => {
     if (ended) return;
-    ended = true;
     try {
       recognition.abort();
     } catch {
-      recognition.stop();
+      try {
+        recognition.stop();
+      } catch {
+        // The browser may already have ended the recognition session.
+      }
     }
-    onEnd();
+    finish();
   };
 }
