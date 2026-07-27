@@ -3,6 +3,7 @@ import js from '@eslint/js';
 const nodeGlobals = {
   AbortSignal: 'readonly',
   Buffer: 'readonly',
+  URL: 'readonly',
   __dirname: 'readonly',
   clearTimeout: 'readonly',
   console: 'readonly',
