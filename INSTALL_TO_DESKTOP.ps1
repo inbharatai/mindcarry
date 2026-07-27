@@ -14,6 +14,11 @@ function Refresh-Path {
   $env:Path = "$machine;$user"
 }
 
+function Invoke-Native([scriptblock]$Command, [string]$FailureMessage) {
+  & $Command
+  if ($LASTEXITCODE -ne 0) { throw $FailureMessage }
+}
+
 function Install-WithWinget([string]$Id, [string]$Name) {
   if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
     throw "$Name is missing and Windows Package Manager (winget) is unavailable. Install $Name, then rerun this script."
@@ -24,6 +29,7 @@ function Install-WithWinget([string]$Id, [string]$Name) {
   Refresh-Path
 }
 
+if (-not $Desktop) { throw "Windows Desktop location could not be resolved." }
 Start-Transcript -Path $BootstrapLog -Append | Out-Null
 try {
   Write-Step "Preparing MindCarry on the Desktop"
@@ -36,9 +42,22 @@ try {
 
   if (Test-Path (Join-Path $Destination ".git")) {
     Write-Step "Updating the existing MindCarry repository"
-    & git -C $Destination fetch origin
+    & git -C $Destination remote get-url origin
+    if ($LASTEXITCODE -ne 0) { throw "The existing MindCarry folder has no usable origin remote." }
+    $originUrl = (& git -C $Destination remote get-url origin).Trim()
+    if ($originUrl -notin @($RepositoryUrl, "git@github.com:inbharatai/mindcarry.git")) {
+      throw "The existing folder points to a different Git repository: $originUrl"
+    }
+    & git -C $Destination status --porcelain
+    if ($LASTEXITCODE -ne 0) { throw "Could not inspect the existing MindCarry repository." }
+    $changes = @(& git -C $Destination status --porcelain)
+    if ($changes.Count -gt 0) {
+      throw "The existing MindCarry folder contains local changes. Commit, move or discard them before updating."
+    }
+    & git -C $Destination fetch --prune origin
     if ($LASTEXITCODE -ne 0) { throw "Could not fetch MindCarry from GitHub." }
     & git -C $Destination checkout main
+    if ($LASTEXITCODE -ne 0) { throw "Could not switch the existing repository to main." }
     & git -C $Destination pull --ff-only origin main
     if ($LASTEXITCODE -ne 0) { throw "Could not update the existing MindCarry folder safely." }
   }
@@ -47,13 +66,13 @@ try {
     if ($items.Count -gt 0) {
       throw "$Destination already exists and is not a Git repository. Rename or remove it, then rerun this script."
     }
-    Write-Step "Cloning MindCarry"
-    & git clone $RepositoryUrl $Destination
+    Write-Step "Cloning the main branch of MindCarry"
+    & git clone --branch main --single-branch $RepositoryUrl $Destination
     if ($LASTEXITCODE -ne 0) { throw "Could not clone MindCarry from GitHub." }
   }
   else {
-    Write-Step "Creating the Desktop folder and cloning MindCarry"
-    & git clone $RepositoryUrl $Destination
+    Write-Step "Creating the Desktop folder and cloning the main branch"
+    & git clone --branch main --single-branch $RepositoryUrl $Destination
     if ($LASTEXITCODE -ne 0) { throw "Could not clone MindCarry from GitHub." }
   }
 
