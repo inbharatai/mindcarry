@@ -49,7 +49,13 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    refresh().catch((reason) => setError(errorText(reason)));
+    let mounted = true;
+    refresh().catch((reason) => {
+      if (mounted) setError(errorText(reason));
+    });
+    return () => {
+      mounted = false;
+    };
   }, [refresh]);
 
   async function run<T>(task: () => Promise<T>): Promise<T | undefined> {
@@ -340,8 +346,8 @@ function CreateLearner({ busy, secureStorageAvailable, onCancel, onCreate }: {
         </div>
         {!secureStorageAvailable && <div className="inline-error">Secure operating-system storage is unavailable. MindCarry will not create an insecure learner catalogue.</div>}
         <div className="field-grid">
-          <label>Parent passphrase<input required minLength={12} maxLength={256} type="password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} /><small>Use at least 12 characters. This passphrase protects the portable learner database.</small></label>
-          <label>Confirm passphrase<input required minLength={12} maxLength={256} type="password" value={confirm} onChange={(event) => setConfirm(event.target.value)} /><small className={confirm && confirm !== passphrase ? 'field-error' : ''}>{confirm && confirm !== passphrase ? 'Passphrases do not match.' : 'MindCarry cannot recover a forgotten passphrase.'}</small></label>
+          <label>Parent passphrase<input required minLength={12} maxLength={256} type="password" autoComplete="new-password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} /><small>Use at least 12 characters. This passphrase protects the portable learner database.</small></label>
+          <label>Confirm passphrase<input required minLength={12} maxLength={256} type="password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} /><small className={confirm && confirm !== passphrase ? 'field-error' : ''}>{confirm && confirm !== passphrase ? 'Passphrases do not match.' : 'MindCarry cannot recover a forgotten passphrase.'}</small></label>
         </div>
         <div className="form-actions"><button type="button" className="secondary" onClick={onCancel}>Cancel</button><button className="primary" disabled={busy || !secureStorageAvailable || passphrase !== confirm || passphrase.length < 12}>{busy ? 'Encrypting…' : 'Create Learner Memory'}</button></div>
       </form>
@@ -364,7 +370,7 @@ function Unlock({ learner, busy, onBack, onUnlock }: {
       <h1>{learner.metadataState === 'locked' ? 'Verify imported learner' : `Welcome back, ${learner.preferredName}`}</h1>
       <p>Enter the original parent passphrase to decrypt the learner profile, inbox and local learning graph.</p>
       <form onSubmit={(event) => { event.preventDefault(); void onUnlock(passphrase); }}>
-        <input autoFocus required minLength={8} maxLength={256} type="password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} />
+        <input autoFocus required minLength={8} maxLength={256} type="password" autoComplete="current-password" value={passphrase} onChange={(event) => setPassphrase(event.target.value)} />
         <button className="primary full-width" disabled={busy}>{busy ? 'Opening…' : 'Open Learner Memory'}</button>
       </form>
     </section>
@@ -441,41 +447,73 @@ function Lesson({ learner, dashboard, onDone }: {
   const [error, setError] = useState('');
   const startedAt = useRef(Date.now());
   const stopListening = useRef<(() => void) | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
   const cameraEnabled = Boolean(Number(dashboard.consent.camera_allowed) && Number(dashboard.consent.local_behaviour_analysis_allowed));
   const microphoneEnabled = Boolean(Number(dashboard.consent.microphone_allowed));
+  const language = dashboard.profile.preferred_language || 'English';
 
   useEffect(() => {
-    window.mindcarry.lessons.start(learner.learnerId)
-      .then((start) => {
+    let disposed = false;
+    void window.mindcarry.lessons.start(learner.learnerId)
+      .then(async (start) => {
+        sessionIdRef.current = start.sessionId;
+        if (disposed) {
+          await window.mindcarry.lessons.cancel(start.sessionId).catch(() => undefined);
+          return;
+        }
         setSession(start);
         setQuestion(start.question);
         setMessage(start.greeting);
         startedAt.current = Date.now();
-        speak(`${start.greeting} ${start.question.prompt}`);
+        speak(`${start.greeting} ${start.question.prompt}`, 0.92, language);
       })
-      .catch((reason) => setError(errorText(reason)))
-      .finally(() => setBusy(false));
-    return () => { stopListening.current?.(); window.speechSynthesis?.cancel(); };
-  }, [learner.learnerId]);
+      .catch((reason) => {
+        if (!disposed) setError(errorText(reason));
+      })
+      .finally(() => {
+        if (!disposed) setBusy(false);
+      });
+
+    return () => {
+      disposed = true;
+      stopListening.current?.();
+      stopListening.current = null;
+      window.speechSynthesis?.cancel();
+      const activeSessionId = sessionIdRef.current;
+      if (activeSessionId) void window.mindcarry.lessons.cancel(activeSessionId).catch(() => undefined);
+    };
+  }, [learner.learnerId, language]);
 
   async function cancelAndExit() {
     stopListening.current?.();
+    stopListening.current = null;
     window.speechSynthesis?.cancel();
-    if (session) await window.mindcarry.lessons.cancel(session.sessionId).catch(() => undefined);
+    const activeSessionId = sessionIdRef.current;
+    if (activeSessionId) await window.mindcarry.lessons.cancel(activeSessionId).catch(() => undefined);
+    sessionIdRef.current = null;
     await onDone();
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!session || !answer.trim()) return;
+    if (!session || !answer.trim() || busy) return;
     setBusy(true);
     setError('');
     try {
-      const reply = await window.mindcarry.lessons.answer({ sessionId: session.sessionId, answer, reasoning, responseMs: Date.now() - startedAt.current, usedHint, movementLevel: cameraEnabled ? movement : undefined });
+      const reply = await window.mindcarry.lessons.answer({
+        sessionId: session.sessionId,
+        answer,
+        reasoning,
+        responseMs: Date.now() - startedAt.current,
+        usedHint,
+        movementLevel: cameraEnabled ? movement : undefined,
+      });
       setMessage(reply.explanation);
-      speak(reply.explanation + (reply.question ? ` ${reply.question.prompt}` : ''));
-      if (reply.completed) setResult(reply);
-      else {
+      speak(reply.explanation + (reply.question ? ` ${reply.question.prompt}` : ''), 0.92, language);
+      if (reply.completed) {
+        sessionIdRef.current = null;
+        setResult(reply);
+      } else {
         setQuestion(reply.question || null);
         setAnswer('');
         setReasoning('');
@@ -507,16 +545,16 @@ function Lesson({ learner, dashboard, onDone }: {
         <div className="tutor-bubble"><div className="tutor-avatar">M</div><p>{message}</p></div>
         {question && <div className="question-card"><span>Try this</span><h1>{question.prompt}</h1><div className="visual-aid">{question.visual}</div></div>}
         <form className="answer-area" onSubmit={submit}>
-          <label>Your answer<div className="voice-input"><input maxLength={100} value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Say or type the answer" /><button type="button" className="mic" disabled={!microphoneEnabled} title={microphoneEnabled ? 'Use microphone' : 'Microphone disabled by parent'} onClick={() => { if (!microphoneEnabled) { setError('Microphone access is disabled for this learner. Type the answer instead.'); return; } stopListening.current?.(); stopListening.current = listenOnce(setAnswer, setError, () => { stopListening.current = null; }, dashboard.profile.preferred_language); }}>🎙</button></div></label>
+          <label>Your answer<div className="voice-input"><input inputMode="numeric" maxLength={100} value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Say or type the answer" /><button type="button" className="mic" disabled={!microphoneEnabled || busy} title={microphoneEnabled ? 'Use microphone' : 'Microphone disabled by parent'} onClick={() => { if (!microphoneEnabled) { setError('Microphone access is disabled for this learner. Type the answer instead.'); return; } stopListening.current?.(); stopListening.current = listenOnce(setAnswer, setError, () => { stopListening.current = null; }, language); }}>🎙</button></div></label>
           <label>How did you work it out?<textarea maxLength={500} rows={2} value={reasoning} onChange={(event) => setReasoning(event.target.value)} /></label>
-          <div className="lesson-actions"><button type="button" className="secondary" onClick={() => { setUsedHint(true); setMessage('Start with the larger number, then count on one step at a time.'); speak('Start with the larger number, then count on one step at a time.'); }}>Show me another way</button><button className="primary" disabled={busy || !answer.trim()}>{busy ? 'Thinking…' : 'Check my thinking →'}</button></div>
+          <div className="lesson-actions"><button type="button" className="secondary" disabled={busy} onClick={() => { setUsedHint(true); setMessage('Start with the larger number, then count on one step at a time.'); speak('Start with the larger number, then count on one step at a time.', 0.92, language); }}>Show me another way</button><button className="primary" disabled={busy || !answer.trim()}>{busy ? 'Thinking…' : 'Check my thinking →'}</button></div>
         </form>
         {error && <div className="inline-error">{error}</div>}
       </div>
       <aside className="lesson-observer">
         <CameraObserver enabled={cameraEnabled} onMovementChange={setMovement} />
         <div className="observer-card"><span className="eyebrow">OBSERVABLE CUES</span><h3>Local movement signal</h3><strong>{cameraEnabled ? `${Math.round(movement * 100)}%` : 'Off'}</strong><p>This is not an emotion, diagnosis or judgement.</p></div>
-        <div className="observer-card"><span className="eyebrow">MEMORY CONTEXT</span><p>{session?.memoryContextLoaded || 0} relevant prior memories were loaded locally. The full database was not sent to the AI provider.</p></div>
+        <div className="observer-card"><span className="eyebrow">MEMORY CONTEXT</span><p>{session?.memoryContextLoaded || 0} relevant prior memories were selected locally. The full database was not sent to the AI provider.</p></div>
         <div className="observer-card"><span className="eyebrow">WHAT IS SAVED</span><p>Answer evidence, response time, misconception and intervention outcome. Raw video is not saved.</p></div>
       </aside>
     </section>
@@ -537,13 +575,13 @@ function Settings({ status, busy, run, onBack, onChanged }: {
       <div className="section-heading"><button className="back-button" onClick={onBack}>←</button><div><span className="eyebrow">SETTINGS</span><h1>Gemini and encrypted local storage</h1></div></div>
       <div className="settings-section"><h3>Current AI mode</h3><div className="provider-card large"><span className={`provider-light ${status?.provider === 'gemini' ? 'connected' : ''}`} /><div><strong>{status?.provider === 'gemini' ? 'Gemini connected' : 'Safe demo mode'}</strong><small>{status?.provider === 'gemini' ? status.model : 'No API key is required for the deterministic demo.'}</small></div></div></div>
       <form className="settings-section" onSubmit={async (event) => { event.preventDefault(); const response = await run(() => window.mindcarry.settings.setGeminiKey(apiKey)); if (response) { setResult(response); setApiKey(''); await onChanged('Gemini key was tested successfully and stored with operating-system encryption.'); } }}>
-        <h3>Gemini test API key</h3><p>MindCarry tests the key before enabling Gemini. The key never enters a learner folder or <code>.childmind</code> export.</p>
-        <label>API key<input type="password" minLength={20} maxLength={300} required value={apiKey} onChange={(event) => setApiKey(event.target.value)} /></label>
+        <h3>Gemini test API key</h3><p>Paste the key only here. MindCarry tests it before enabling Gemini and keeps it outside learner folders, logs and <code>.childmind</code> exports.</p>
+        <label>API key<input type="password" autoComplete="off" spellCheck={false} minLength={20} maxLength={300} required value={apiKey} onChange={(event) => setApiKey(event.target.value)} /></label>
         <button className="primary" disabled={busy || !status?.secureStorageAvailable}>Save securely and test Gemini</button>
-        {!status?.secureStorageAvailable && <div className="inline-error">Secure OS credential storage is unavailable, so API-key storage is disabled.</div>}
+        {!status?.secureStorageAvailable && <div className="inline-error">Secure OS credential storage is unavailable or insecure on this device, so API-key storage is disabled.</div>}
       </form>
       <div className="settings-section"><div className="button-row"><button className="secondary" onClick={async () => { const response = await run(() => window.mindcarry.settings.testProvider()); if (response) setResult(response); }}>Test provider</button><button className="danger-link" onClick={async () => { const response = await run(() => window.mindcarry.settings.removeGeminiKey()); if (response) await onChanged('Gemini key removed. Demo mode restored.'); }}>Remove Gemini key</button></div>{result && <div className={`provider-result ${result.ok ? 'ok' : 'bad'}`}><strong>{result.ok ? 'Connected' : 'Connection failed'}</strong><span>{result.message}</span></div>}</div>
-      <div className="settings-section"><h3>Automatic local vault</h3><p>MindCarry created and manages this location automatically. The Memory Inbox, graph and learner records are encrypted with the parent passphrase.</p><code className="path-code">{status?.vault.root || 'Loading…'}</code><div className="button-row"><button className="secondary" onClick={() => void run(() => window.mindcarry.app.openDataFolder())}>Open vault folder</button><span>{status?.vault.ready ? 'Vault ready' : 'Vault unavailable'}</span></div></div>
+      <div className="settings-section"><h3>Automatic local vault</h3><p>MindCarry created and manages this location automatically. The Memory Inbox, graph and learner records are encrypted with the parent passphrase.</p><code className="path-code">{status?.vault.root || 'Loading…'}</code><div className="button-row"><button className="secondary" onClick={() => void run(() => window.mindcarry.app.openDataFolder())}>Open vault folder</button><span>{status?.vault.ready ? `Vault ready · ${status.secureStorageBackend}` : 'Vault unavailable'}</span></div></div>
     </section>
   );
 }
