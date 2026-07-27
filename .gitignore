@@ -3,8 +3,13 @@ dist/
 release/
 coverage/
 *.log
+*.childmind
+MindCarryVault/
+MindCarryData/
 .DS_Store
 Thumbs.db
 .env
+.env.*
+!.env.example
 .vscode/
 .idea/

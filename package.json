@@ -1,7 +1,8 @@
 {
   "name": "mindcarry",
-  "version": "0.1.0",
+  "version": "0.2.0-alpha.1",
   "private": true,
+  "license": "UNLICENSED",
   "description": "A private, portable AI tutor that learns how each child learns.",
   "main": "electron/main.cjs",
   "type": "module",
@@ -14,38 +15,40 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:core": "node scripts/core-smoke-test.mjs",
-    "lint": "eslint electron scripts eslint.config.js",
-    "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder",
-    "check": "npm run test:core && npm run build"
+    "lint": "eslint electron scripts eslint.config.js --max-warnings=0",
+    "check": "npm run lint && npm run test:core && npm test && npm run build",
+    "pack": "npm run check && electron-builder --dir",
+    "dist": "npm run check && electron-builder"
   },
   "dependencies": {
-    "@google/genai": "^2.13.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "sql.js": "^1.13.0",
-    "zod": "^4.4.3",
-    "zustand": "^5.0.14"
+    "@google/genai": "2.13.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "sql.js": "1.13.0"
   },
   "devDependencies": {
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.3",
-    "concurrently": "^10.0.4",
-    "cross-env": "^10.1.0",
-    "electron": "^43.2.0",
-    "electron-builder": "^26.15.3",
-    "eslint": "^9.39.2",
-    "typescript": "^5.9.2",
-    "vite": "^8.1.5",
-    "vitest": "^4.1.10",
-    "wait-on": "^9.1.0",
-    "@eslint/js": "^9.39.2",
-    "@types/node": "^24.10.0"
+    "@eslint/js": "9.39.2",
+    "@types/node": "24.10.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.3",
+    "concurrently": "10.0.4",
+    "cross-env": "10.1.0",
+    "electron": "43.2.0",
+    "electron-builder": "26.15.3",
+    "eslint": "9.39.2",
+    "typescript": "5.9.2",
+    "vite": "8.1.5",
+    "vitest": "4.1.10",
+    "wait-on": "9.1.0"
   },
   "build": {
     "appId": "ai.inbharat.mindcarry",
     "productName": "MindCarry",
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/sql.js/dist/sql-wasm.wasm"
+    ],
     "files": [
       "dist/**/*",
       "electron/**/*",

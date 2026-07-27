@@ -2,116 +2,240 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const initSqlJs = require('sql.js');
-const { encryptBuffer, decryptBuffer, sha256 } = require('./crypto.cjs');
-const { SCHEMA_SQL } = require('./schema.cjs');
+const { decryptBuffer, encryptBuffer, safeHashEqual, sha256 } = require('./crypto.cjs');
+const { masteryStatus } = require('./lessonEngine.cjs');
+const { SCHEMA_SQL, SCHEMA_VERSION } = require('./schema.cjs');
+
+const PACKAGE_FORMAT = 'mindcarry-childmind';
+const PACKAGE_VERSION = 2;
+const MAX_IMPORT_BYTES = 256 * 1024 * 1024;
 
 class MemoryStore {
-  constructor(rootDir) {
-    this.rootDir = rootDir;
+  constructor(vault, catalog) {
+    this.vault = vault;
+    this.catalog = catalog;
     this.sessions = new Map();
-    fs.mkdirSync(rootDir, { recursive: true });
+    this.initialised = false;
+    this.initialising = null;
   }
 
   async initialise() {
-    if (!this.SQL) {
-      const wasmPath = require.resolve('sql.js/dist/sql-wasm.wasm');
-      this.SQL = await initSqlJs({ locateFile: () => wasmPath });
+    if (this.initialised) return;
+    if (this.initialising) return this.initialising;
+    this.initialising = (async () => {
+      this.vault.ensure();
+      if (!this.SQL) {
+        const wasmPath = require.resolve('sql.js/dist/sql-wasm.wasm');
+        this.SQL = await initSqlJs({ locateFile: () => wasmPath });
+      }
+      await this.migrateLegacyManifests();
+      this.initialised = true;
+    })();
+    try {
+      await this.initialising;
+    } finally {
+      this.initialising = null;
     }
   }
 
-  validateLearnerId(learnerId) {
-    if (typeof learnerId !== 'string' || !/^[a-f0-9-]{36}$/i.test(learnerId)) {
-      throw new Error('Learner identifier is invalid.');
+  paths(learnerId) {
+    return this.vault.learnerPaths(learnerId);
+  }
+
+  async migrateLegacyManifests() {
+    const existing = new Map(this.catalog.list().map((entry) => [entry.learnerId, entry]));
+    if (!fs.existsSync(this.vault.learnersDir)) return;
+    for (const entry of fs.readdirSync(this.vault.learnersDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      let learnerId;
+      try {
+        learnerId = this.vault.validateLearnerId(entry.name);
+      } catch {
+        continue;
+      }
+      const paths = this.paths(learnerId);
+      if (!fs.existsSync(paths.manifest) || !fs.existsSync(paths.database)) continue;
+      let manifest;
+      try {
+        manifest = JSON.parse(fs.readFileSync(paths.manifest, 'utf8'));
+      } catch {
+        continue;
+      }
+      if (!existing.has(learnerId)) {
+        const catalogueEntry = this.catalog.upsert({
+          learnerId,
+          preferredName: manifest.preferredName || 'Encrypted learner',
+          age: Number.isInteger(manifest.age) ? manifest.age : null,
+          language: manifest.language || null,
+          createdAt: manifest.createdAt || new Date().toISOString(),
+          updatedAt: manifest.updatedAt || manifest.createdAt || new Date().toISOString(),
+          metadataState: manifest.preferredName ? 'verified' : 'locked',
+        });
+        existing.set(learnerId, catalogueEntry);
+      }
+      if (manifest.preferredName || manifest.age || manifest.language) {
+        this.writeManifest(learnerId, {
+          createdAt: manifest.createdAt,
+          updatedAt: manifest.updatedAt,
+          dbSha256: manifest.dbSha256 || sha256(fs.readFileSync(paths.database)),
+          encryption: manifest.encryption || 'aes-256-gcm+scrypt',
+        });
+      }
     }
-    return learnerId;
-  }
-
-  learnerDir(learnerId) {
-    return path.join(this.rootDir, this.validateLearnerId(learnerId));
-  }
-
-  manifestPath(learnerId) {
-    return path.join(this.learnerDir(learnerId), 'manifest.json');
-  }
-
-  encryptedDbPath(learnerId) {
-    return path.join(this.learnerDir(learnerId), 'learner.db.enc');
   }
 
   listLearners() {
-    if (!fs.existsSync(this.rootDir)) return [];
-    return fs
-      .readdirSync(this.rootDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => {
-        try {
-          return JSON.parse(fs.readFileSync(this.manifestPath(entry.name), 'utf8'));
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
+    return this.catalog.list();
+  }
+
+  writeManifest(learnerId, values = {}) {
+    const paths = this.vault.ensureLearnerStructure(learnerId);
+    const now = new Date().toISOString();
+    const existing = fs.existsSync(paths.manifest)
+      ? (() => {
+          try {
+            return JSON.parse(fs.readFileSync(paths.manifest, 'utf8'));
+          } catch {
+            return {};
+          }
+        })()
+      : {};
+    const manifest = {
+      format: 'mindcarry-learner',
+      formatVersion: 1,
+      schemaVersion: SCHEMA_VERSION,
+      learnerId,
+      createdAt: values.createdAt || existing.createdAt || now,
+      updatedAt: values.updatedAt || now,
+      encryption: values.encryption || 'aes-256-gcm+scrypt',
+      dbSha256: values.dbSha256 || existing.dbSha256 || null,
+      containsPersonalData: false,
+    };
+    this.vault.atomicWriteJson(paths.manifest, manifest);
+    return manifest;
   }
 
   async createLearner({ preferredName, age, language = 'English', interests = [], parentGoal = '', passphrase, consent }) {
     await this.initialise();
     const learnerId = crypto.randomUUID();
     const createdAt = new Date().toISOString();
-    const dir = this.learnerDir(learnerId);
-    fs.mkdirSync(dir, { recursive: true });
+    const paths = this.vault.ensureLearnerStructure(learnerId);
     const db = new this.SQL.Database();
-    db.run(SCHEMA_SQL);
-    db.run(
-      `INSERT INTO profile VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [learnerId, preferredName.trim(), Number(age), language, JSON.stringify(interests), parentGoal, createdAt, createdAt],
-    );
-    db.run(
-      `INSERT INTO consent VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
+    try {
+      db.run(SCHEMA_SQL);
+      db.run(
+        `INSERT INTO profile (learner_id, preferred_name, age, preferred_language, interests_json, parent_goal, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [learnerId, preferredName.trim(), Number(age), language, JSON.stringify(interests), parentGoal, createdAt, createdAt],
+      );
+      db.run(
+        `INSERT INTO consent (learner_id, microphone_allowed, camera_allowed, local_behaviour_analysis_allowed,
+          transcript_storage_allowed, raw_audio_storage_allowed, raw_video_storage_allowed, consent_version, consented_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          learnerId,
+          consent?.microphoneAllowed === false ? 0 : 1,
+          consent?.cameraAllowed ? 1 : 0,
+          consent?.localBehaviourAnalysisAllowed ? 1 : 0,
+          consent?.transcriptStorageAllowed === false ? 0 : 1,
+          consent?.rawAudioStorageAllowed ? 1 : 0,
+          consent?.rawVideoStorageAllowed ? 1 : 0,
+          '1.0',
+          createdAt,
+        ],
+      );
+      db.run(
+        `INSERT INTO skills (skill_id, domain, name, mastery, status, attempts, last_practised, next_review)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ['addition-within-20', 'mathematics', 'Addition within 20', 0, 'introduced', 0, null, null],
+      );
+      this.writeManifest(learnerId, { createdAt, updatedAt: createdAt });
+      await this.saveDatabase(learnerId, db, passphrase, { createBackup: false });
+      const catalogueEntry = this.catalog.upsert({
         learnerId,
-        consent?.microphoneAllowed === false ? 0 : 1,
-        consent?.cameraAllowed ? 1 : 0,
-        consent?.localBehaviourAnalysisAllowed ? 1 : 0,
-        consent?.transcriptStorageAllowed === false ? 0 : 1,
-        consent?.rawAudioStorageAllowed ? 1 : 0,
-        consent?.rawVideoStorageAllowed ? 1 : 0,
-        '1.0',
+        preferredName: preferredName.trim(),
+        age: Number(age),
+        language,
         createdAt,
-      ],
-    );
-    db.run(`INSERT INTO skills VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [
-      'addition-within-20',
-      'mathematics',
-      'Addition within 20',
-      0,
-      'introduced',
-      0,
-      null,
-      null,
-    ]);
-    const manifest = {
-      schemaVersion: 1,
-      learnerId,
-      preferredName: preferredName.trim(),
-      age: Number(age),
-      language,
-      createdAt,
-      updatedAt: createdAt,
-      encryption: 'aes-256-gcm+scrypt',
-    };
-    fs.writeFileSync(this.manifestPath(learnerId), JSON.stringify(manifest, null, 2));
-    await this.saveDatabase(learnerId, db, passphrase);
-    db.close();
-    return manifest;
+        updatedAt: createdAt,
+        metadataState: 'verified',
+      });
+      db.close();
+      return catalogueEntry;
+    } catch (error) {
+      try {
+        db.close();
+      } catch {
+        // Best-effort cleanup.
+      }
+      this.vault.removeLearnerStructure(learnerId);
+      throw error;
+    } finally {
+      if (fs.existsSync(paths.sessionCache)) {
+        for (const file of fs.readdirSync(paths.sessionCache)) fs.rmSync(path.join(paths.sessionCache, file), { force: true });
+      }
+    }
+  }
+
+  tableColumns(db, table) {
+    return new Set(this.queryAll(db, `PRAGMA table_info(${table})`).map((row) => String(row.name)));
+  }
+
+  migrateDatabase(db) {
+    db.run(SCHEMA_SQL);
+    const additions = [
+      ['sessions', 'status', "TEXT NOT NULL DEFAULT 'active'"],
+      ['attempts', 'reasoning_observation', 'TEXT'],
+      ['attempts', 'provider', 'TEXT'],
+      ['memories', 'evidence_count', 'INTEGER NOT NULL DEFAULT 1'],
+      ['memories', 'active', 'INTEGER NOT NULL DEFAULT 1'],
+    ];
+    for (const [table, column, type] of additions) {
+      if (!this.tableColumns(db, table).has(column)) db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
+    db.run('CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(active, last_confirmed)');
+    db.run(`INSERT OR REPLACE INTO metadata (key, value) VALUES ('schema_version', ?)`, [String(SCHEMA_VERSION)]);
+  }
+
+  verifyDatabase(db, learnerId) {
+    const integrity = this.queryOne(db, 'PRAGMA integrity_check');
+    if (!integrity || String(Object.values(integrity)[0]).toLowerCase() !== 'ok') {
+      throw new Error('Learner database failed integrity verification.');
+    }
+    const profile = this.queryOne(db, 'SELECT learner_id FROM profile LIMIT 1');
+    if (!profile || profile.learner_id !== learnerId) throw new Error('Learner database identity does not match its folder.');
   }
 
   async open(learnerId, passphrase) {
     await this.initialise();
-    const encrypted = fs.readFileSync(this.encryptedDbPath(learnerId));
-    const plain = decryptBuffer(encrypted, passphrase, learnerId);
+    const paths = this.paths(learnerId);
+    const encrypted = fs.readFileSync(paths.database);
+    const plain = await decryptBuffer(encrypted, passphrase, learnerId);
     const db = new this.SQL.Database(new Uint8Array(plain));
-    this.sessions.set(learnerId, { db, passphrase, openedAt: Date.now() });
-    return this.dashboard(learnerId);
+    plain.fill(0);
+    try {
+      this.migrateDatabase(db);
+      this.verifyDatabase(db, learnerId);
+      const previous = this.sessions.get(learnerId);
+      if (previous) previous.db.close();
+      this.sessions.set(learnerId, { db, passphrase, openedAt: Date.now() });
+      const dashboard = this.dashboard(learnerId);
+      this.catalog.upsert({
+        learnerId,
+        preferredName: dashboard.profile.preferred_name,
+        age: Number(dashboard.profile.age),
+        language: dashboard.profile.preferred_language,
+        createdAt: dashboard.profile.created_at,
+        updatedAt: dashboard.profile.updated_at,
+        metadataState: 'verified',
+      });
+      await this.persist(learnerId);
+      return dashboard;
+    } catch (error) {
+      this.sessions.delete(learnerId);
+      db.close();
+      throw error;
+    }
   }
 
   close(learnerId) {
@@ -120,23 +244,28 @@ class MemoryStore {
     this.sessions.delete(learnerId);
   }
 
+  closeAll() {
+    for (const learnerId of [...this.sessions.keys()]) this.close(learnerId);
+  }
+
   requireOpen(learnerId) {
     const session = this.sessions.get(learnerId);
     if (!session) throw new Error('Learner memory is locked.');
     return session;
   }
 
-  async saveDatabase(learnerId, db, passphrase) {
+  async saveDatabase(learnerId, db, passphrase, { createBackup = true } = {}) {
+    const paths = this.vault.ensureLearnerStructure(learnerId);
     const bytes = Buffer.from(db.export());
-    const encrypted = encryptBuffer(bytes, passphrase, learnerId);
-    const target = this.encryptedDbPath(learnerId);
-    const temp = `${target}.tmp`;
-    fs.writeFileSync(temp, encrypted);
-    fs.renameSync(temp, target);
-    const manifest = JSON.parse(fs.readFileSync(this.manifestPath(learnerId), 'utf8'));
-    manifest.updatedAt = new Date().toISOString();
-    manifest.dbSha256 = sha256(encrypted);
-    fs.writeFileSync(this.manifestPath(learnerId), JSON.stringify(manifest, null, 2));
+    const encrypted = await encryptBuffer(bytes, passphrase, learnerId);
+    bytes.fill(0);
+    if (createBackup) this.vault.backupFile(paths.database, paths.backups, 'learner-db', 5);
+    this.vault.atomicWrite(paths.database, encrypted);
+    this.writeManifest(learnerId, {
+      updatedAt: new Date().toISOString(),
+      dbSha256: sha256(encrypted),
+      encryption: 'aes-256-gcm+scrypt',
+    });
   }
 
   async persist(learnerId) {
@@ -146,19 +275,24 @@ class MemoryStore {
 
   queryOne(db, sql, params = []) {
     const statement = db.prepare(sql);
-    statement.bind(params);
-    const row = statement.step() ? statement.getAsObject() : null;
-    statement.free();
-    return row;
+    try {
+      statement.bind(params);
+      return statement.step() ? statement.getAsObject() : null;
+    } finally {
+      statement.free();
+    }
   }
 
   queryAll(db, sql, params = []) {
     const statement = db.prepare(sql);
-    statement.bind(params);
     const rows = [];
-    while (statement.step()) rows.push(statement.getAsObject());
-    statement.free();
-    return rows;
+    try {
+      statement.bind(params);
+      while (statement.step()) rows.push(statement.getAsObject());
+      return rows;
+    } finally {
+      statement.free();
+    }
   }
 
   dashboard(learnerId) {
@@ -166,13 +300,16 @@ class MemoryStore {
     const profile = this.queryOne(db, 'SELECT * FROM profile WHERE learner_id = ?', [learnerId]);
     const consent = this.queryOne(db, 'SELECT * FROM consent WHERE learner_id = ?', [learnerId]);
     const skills = this.queryAll(db, 'SELECT * FROM skills ORDER BY domain, name');
-    const recentSessions = this.queryAll(db, 'SELECT * FROM sessions ORDER BY started_at DESC LIMIT 5');
-    const memories = this.queryAll(db, 'SELECT * FROM memories ORDER BY last_confirmed DESC LIMIT 12');
+    const recentSessions = this.queryAll(
+      db,
+      `SELECT * FROM sessions WHERE status = 'completed' ORDER BY started_at DESC LIMIT 5`,
+    );
+    const memories = this.queryAll(
+      db,
+      'SELECT * FROM memories WHERE active = 1 ORDER BY last_confirmed DESC LIMIT 12',
+    );
     return {
-      profile: {
-        ...profile,
-        interests: JSON.parse(profile?.interests_json || '[]'),
-      },
+      profile: { ...profile, interests: JSON.parse(profile?.interests_json || '[]') },
       consent,
       skills,
       recentSessions,
@@ -182,13 +319,18 @@ class MemoryStore {
 
   async startSession(learnerId, objective = 'Practise addition within 20') {
     const { db } = this.requireOpen(learnerId);
+    const now = new Date().toISOString();
+    db.run(
+      `UPDATE sessions SET ended_at = ?, status = 'interrupted',
+       summary = COALESCE(summary, 'The previous lesson ended before completion.')
+       WHERE learner_id = ? AND status = 'active'`,
+      [now, learnerId],
+    );
     const sessionId = crypto.randomUUID();
-    db.run('INSERT INTO sessions (session_id, learner_id, started_at, objective) VALUES (?, ?, ?, ?)', [
-      sessionId,
-      learnerId,
-      new Date().toISOString(),
-      objective,
-    ]);
+    db.run(
+      `INSERT INTO sessions (session_id, learner_id, started_at, objective, status) VALUES (?, ?, ?, ?, 'active')`,
+      [sessionId, learnerId, now, objective],
+    );
     await this.persist(learnerId);
     return { sessionId };
   }
@@ -196,19 +338,24 @@ class MemoryStore {
   async recordAttempt(learnerId, data) {
     const { db } = this.requireOpen(learnerId);
     db.run(
-      `INSERT INTO attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO attempts (
+        attempt_id, session_id, question_id, prompt, answer_text, correct, independent, used_hint,
+        response_ms, misconception, intervention, reasoning_observation, provider, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         crypto.randomUUID(),
         data.sessionId,
         data.questionId,
         data.prompt,
-        String(data.answerText),
+        String(data.answerText).slice(0, 500),
         data.correct ? 1 : 0,
         data.independent ? 1 : 0,
         data.usedHint ? 1 : 0,
-        Number(data.responseMs || 0),
+        Math.max(0, Number(data.responseMs || 0)),
         data.misconception || null,
         data.intervention || null,
+        data.reasoningObservation || null,
+        data.provider || 'deterministic',
         new Date().toISOString(),
       ],
     );
@@ -217,79 +364,183 @@ class MemoryStore {
 
   async recordEngagement(learnerId, data) {
     const { db } = this.requireOpen(learnerId);
-    db.run('INSERT INTO engagement_events VALUES (?, ?, ?, ?, ?, ?)', [
-      crypto.randomUUID(),
-      data.sessionId,
-      Number(data.movementLevel || 0),
-      data.responseLatencyMs == null ? null : Number(data.responseLatencyMs),
-      data.cue || 'observable movement cue',
-      new Date().toISOString(),
-    ]);
+    const movement = Math.max(0, Math.min(1, Number(data.movementLevel || 0)));
+    db.run(
+      `INSERT INTO engagement_events (event_id, session_id, movement_level, response_latency_ms, cue, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        crypto.randomUUID(),
+        data.sessionId,
+        movement,
+        data.responseLatencyMs == null ? null : Math.max(0, Number(data.responseLatencyMs)),
+        String(data.cue || 'Observable movement cue').slice(0, 250),
+        new Date().toISOString(),
+      ],
+    );
     await this.persist(learnerId);
   }
 
   async completeSession(learnerId, sessionId, { summary, nextRecommendation, memories = [], mastery = 0 }) {
     const { db } = this.requireOpen(learnerId);
     const now = new Date().toISOString();
-    db.run('UPDATE sessions SET ended_at = ?, summary = ?, next_recommendation = ? WHERE session_id = ?', [
-      now,
-      summary,
-      nextRecommendation,
-      sessionId,
-    ]);
+    const score = Math.max(0, Math.min(100, Math.round(Number(mastery) || 0)));
     db.run(
-      `UPDATE skills SET mastery = ?, attempts = attempts + 1, last_practised = ?, status = ? WHERE skill_id = 'addition-within-20'`,
-      [mastery, now, mastery >= 80 ? 'nearly mastered' : mastery >= 50 ? 'developing' : 'introduced'],
+      `UPDATE sessions SET ended_at = ?, summary = ?, next_recommendation = ?, status = 'completed'
+       WHERE session_id = ? AND learner_id = ?`,
+      [now, String(summary).slice(0, 1000), String(nextRecommendation).slice(0, 500), sessionId, learnerId],
     );
-    for (const memory of memories) {
-      db.run('INSERT INTO memories VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [
-        crypto.randomUUID(),
-        learnerId,
-        memory.type,
-        memory.content,
-        Number(memory.confidence || 0.6),
-        sessionId,
-        now,
-        now,
-        memory.reviewAfter || null,
-      ]);
+    db.run(
+      `UPDATE skills SET mastery = ?, attempts = attempts + 1, last_practised = ?, status = ?
+       WHERE skill_id = 'addition-within-20'`,
+      [score, now, masteryStatus(score)],
+    );
+    for (const memory of memories.slice(0, 12)) {
+      const type = String(memory.type || 'observation').slice(0, 50);
+      const content = String(memory.content || '').replace(/\s+/g, ' ').trim().slice(0, 500);
+      if (!content) continue;
+      const confidence = Math.max(0, Math.min(0.95, Number(memory.confidence || 0.6)));
+      const existing = this.queryOne(
+        db,
+        'SELECT * FROM memories WHERE learner_id = ? AND type = ? AND content = ? AND active = 1 LIMIT 1',
+        [learnerId, type, content],
+      );
+      if (existing) {
+        const evidenceCount = Number(existing.evidence_count || 1) + 1;
+        const combinedConfidence = Math.min(
+          0.95,
+          (Number(existing.confidence) * Number(existing.evidence_count || 1) + confidence) / evidenceCount,
+        );
+        db.run(
+          `UPDATE memories SET confidence = ?, evidence_count = ?, last_confirmed = ?, source_session = ?
+           WHERE memory_id = ?`,
+          [combinedConfidence, evidenceCount, now, sessionId, existing.memory_id],
+        );
+      } else {
+        db.run(
+          `INSERT INTO memories (
+            memory_id, learner_id, type, content, confidence, source_session, created_at,
+            last_confirmed, review_after, evidence_count, active
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+          [
+            crypto.randomUUID(),
+            learnerId,
+            type,
+            content,
+            confidence,
+            sessionId,
+            now,
+            now,
+            memory.reviewAfter || null,
+            1,
+          ],
+        );
+      }
     }
+    db.run('UPDATE profile SET updated_at = ? WHERE learner_id = ?', [now, learnerId]);
     await this.persist(learnerId);
+    const profile = this.queryOne(db, 'SELECT * FROM profile WHERE learner_id = ?', [learnerId]);
+    this.catalog.upsert({
+      learnerId,
+      preferredName: profile.preferred_name,
+      age: Number(profile.age),
+      language: profile.preferred_language,
+      createdAt: profile.created_at,
+      updatedAt: now,
+      metadataState: 'verified',
+    });
     return this.dashboard(learnerId);
   }
 
+  async cancelSession(learnerId, sessionId) {
+    const { db } = this.requireOpen(learnerId);
+    db.run(
+      `UPDATE sessions SET ended_at = ?, status = 'cancelled',
+       summary = COALESCE(summary, 'The lesson was ended by the family before completion.')
+       WHERE session_id = ? AND learner_id = ? AND status = 'active'`,
+      [new Date().toISOString(), sessionId, learnerId],
+    );
+    await this.persist(learnerId);
+    return { ok: true };
+  }
+
+  defaultExportPath(learnerId) {
+    const shortId = this.vault.validateLearnerId(learnerId).slice(0, 8);
+    const date = new Date().toISOString().slice(0, 10);
+    return path.join(this.vault.exportsDir, `MindCarry-Learner-${shortId}-${date}.childmind`);
+  }
+
   exportPackage(learnerId, destination) {
-    const manifest = JSON.parse(fs.readFileSync(this.manifestPath(learnerId), 'utf8'));
-    const encryptedDb = fs.readFileSync(this.encryptedDbPath(learnerId));
-    const pkg = {
-      format: 'mindcarry-childmind',
-      version: 1,
+    const paths = this.paths(learnerId);
+    const manifest = JSON.parse(fs.readFileSync(paths.manifest, 'utf8'));
+    const encryptedDb = fs.readFileSync(paths.database);
+    const packageData = {
+      format: PACKAGE_FORMAT,
+      version: PACKAGE_VERSION,
       exportedAt: new Date().toISOString(),
-      manifest,
+      manifest: {
+        format: 'mindcarry-learner',
+        formatVersion: 1,
+        schemaVersion: Number(manifest.schemaVersion || SCHEMA_VERSION),
+        learnerId,
+        createdAt: manifest.createdAt,
+        updatedAt: manifest.updatedAt,
+        encryption: manifest.encryption,
+        containsPersonalData: false,
+      },
       encryptedDatabase: encryptedDb.toString('base64'),
       checksum: sha256(encryptedDb),
     };
-    fs.writeFileSync(destination, JSON.stringify(pkg));
+    this.vault.atomicWrite(destination, Buffer.from(JSON.stringify(packageData), 'utf8'));
     return destination;
   }
 
   async importPackage(source) {
-    const pkg = JSON.parse(fs.readFileSync(source, 'utf8'));
-    if (pkg.format !== 'mindcarry-childmind' || pkg.version !== 1) {
-      throw new Error('Unsupported .childmind file.');
+    const stats = fs.statSync(source);
+    if (!stats.isFile() || stats.size < 100 || stats.size > MAX_IMPORT_BYTES) {
+      throw new Error('The selected .childmind file has an invalid size.');
     }
-    const encryptedDb = Buffer.from(pkg.encryptedDatabase, 'base64');
-    if (sha256(encryptedDb) !== pkg.checksum) throw new Error('The .childmind file failed integrity verification.');
-    const learnerId = this.validateLearnerId(pkg?.manifest?.learnerId);
-    const dir = this.learnerDir(learnerId);
-    if (fs.existsSync(dir)) {
-      throw new Error('This learner already exists on this installation.');
+    let packageData;
+    try {
+      packageData = JSON.parse(fs.readFileSync(source, 'utf8'));
+    } catch {
+      throw new Error('The selected file is not a valid .childmind package.');
     }
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(this.manifestPath(learnerId), JSON.stringify(pkg.manifest, null, 2));
-    fs.writeFileSync(this.encryptedDbPath(learnerId), encryptedDb);
-    return pkg.manifest;
+    if (packageData.format !== PACKAGE_FORMAT || ![1, PACKAGE_VERSION].includes(Number(packageData.version))) {
+      throw new Error('This .childmind package version is not supported.');
+    }
+    const encryptedDb = Buffer.from(String(packageData.encryptedDatabase || ''), 'base64');
+    if (encryptedDb.length === 0 || encryptedDb.length > MAX_IMPORT_BYTES) {
+      throw new Error('The encrypted learner database has an invalid size.');
+    }
+    if (!safeHashEqual(sha256(encryptedDb), packageData.checksum)) {
+      throw new Error('The .childmind package failed integrity verification.');
+    }
+    const learnerId = this.vault.validateLearnerId(packageData?.manifest?.learnerId);
+    const paths = this.paths(learnerId);
+    if (fs.existsSync(paths.root)) throw new Error('This learner already exists on this MindCarry installation.');
+    try {
+      this.vault.ensureLearnerStructure(learnerId);
+      this.vault.atomicWrite(paths.database, encryptedDb);
+      this.writeManifest(learnerId, {
+        createdAt: packageData.manifest.createdAt,
+        updatedAt: packageData.manifest.updatedAt,
+        dbSha256: sha256(encryptedDb),
+        encryption: packageData.manifest.encryption || 'aes-256-gcm+scrypt',
+      });
+      return this.catalog.upsert({
+        learnerId,
+        preferredName: 'Imported learner',
+        age: null,
+        language: null,
+        createdAt: packageData.manifest.createdAt || new Date().toISOString(),
+        updatedAt: packageData.manifest.updatedAt || new Date().toISOString(),
+        metadataState: 'locked',
+      });
+    } catch (error) {
+      this.vault.removeLearnerStructure(learnerId);
+      throw error;
+    }
   }
 }
 
-module.exports = { MemoryStore };
+module.exports = { MemoryStore, PACKAGE_FORMAT, PACKAGE_VERSION };
