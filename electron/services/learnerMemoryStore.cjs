@@ -13,7 +13,7 @@ class MemoryStore extends EncryptedMemoryStore {
     await super.open(manifest.learnerId, payload.passphrase);
     try {
       const { db } = this.requireOpen(manifest.learnerId);
-      rebuildMemoryGraph(db, manifest.learnerId);
+      this.transaction(db, () => rebuildMemoryGraph(db, manifest.learnerId));
       await this.persist(manifest.learnerId);
     } finally {
       this.close(manifest.learnerId);
@@ -24,7 +24,7 @@ class MemoryStore extends EncryptedMemoryStore {
   async open(learnerId, passphrase) {
     await super.open(learnerId, passphrase);
     const { db } = this.requireOpen(learnerId);
-    rebuildMemoryGraph(db, learnerId);
+    this.transaction(db, () => rebuildMemoryGraph(db, learnerId));
     await this.persist(learnerId);
     return this.dashboard(learnerId);
   }
@@ -64,31 +64,33 @@ class MemoryStore extends EncryptedMemoryStore {
 
     await super.completeSession(learnerId, sessionId, payload);
 
-    const after = this.queryAll(db, 'SELECT * FROM memories WHERE learner_id = ?', [learnerId]);
-    for (const row of after) {
-      const previous = before.get(String(row.memory_id));
-      if (!previous) {
-        recordMemoryEvent(db, learnerId, {
-          memoryId: row.memory_id,
-          eventType: 'created',
-          sourceSession: row.source_session || sessionId,
-          details: { type: row.type, confidence: Number(row.confidence || 0) },
-        });
-      } else if (Number(previous.evidence_count || 0) !== Number(row.evidence_count || 0)) {
-        recordMemoryEvent(db, learnerId, {
-          memoryId: row.memory_id,
-          eventType: 'reinforced',
-          sourceSession: row.source_session || sessionId,
-          details: {
-            previousEvidenceCount: Number(previous.evidence_count || 0),
-            evidenceCount: Number(row.evidence_count || 0),
-            confidence: Number(row.confidence || 0),
-          },
-        });
+    this.transaction(db, () => {
+      const after = this.queryAll(db, 'SELECT * FROM memories WHERE learner_id = ?', [learnerId]);
+      for (const row of after) {
+        const previous = before.get(String(row.memory_id));
+        if (!previous) {
+          recordMemoryEvent(db, learnerId, {
+            memoryId: row.memory_id,
+            eventType: 'created',
+            sourceSession: row.source_session || sessionId,
+            details: { type: row.type, confidence: Number(row.confidence || 0) },
+          });
+        } else if (Number(previous.evidence_count || 0) !== Number(row.evidence_count || 0)) {
+          recordMemoryEvent(db, learnerId, {
+            memoryId: row.memory_id,
+            eventType: 'reinforced',
+            sourceSession: row.source_session || sessionId,
+            details: {
+              previousEvidenceCount: Number(previous.evidence_count || 0),
+              evidenceCount: Number(row.evidence_count || 0),
+              confidence: Number(row.confidence || 0),
+              remainedArchived: Number(row.active) === 0,
+            },
+          });
+        }
       }
-    }
-
-    rebuildMemoryGraph(db, learnerId);
+      rebuildMemoryGraph(db, learnerId);
+    });
     await this.persist(learnerId);
     return this.dashboard(learnerId);
   }
@@ -103,18 +105,21 @@ class MemoryStore extends EncryptedMemoryStore {
     if (!existing) throw new Error('Learner memory item was not found.');
     const target = active ? 1 : 0;
     if (Number(existing.active) !== target) {
-      db.run('UPDATE memories SET active = ?, last_confirmed = ? WHERE learner_id = ? AND memory_id = ?', [
-        target,
-        new Date().toISOString(),
-        learnerId,
-        memoryId,
-      ]);
-      recordMemoryEvent(db, learnerId, {
-        memoryId,
-        eventType: active ? 'restored' : 'archived',
-        details: { type: existing.type, content: existing.content },
+      this.transaction(db, () => {
+        db.run('UPDATE memories SET active = ?, last_confirmed = ? WHERE learner_id = ? AND memory_id = ?', [
+          target,
+          new Date().toISOString(),
+          learnerId,
+          memoryId,
+        ]);
+        if (db.getRowsModified() !== 1) throw new Error('Learner memory state could not be updated.');
+        recordMemoryEvent(db, learnerId, {
+          memoryId,
+          eventType: active ? 'restored' : 'archived',
+          details: { type: existing.type, content: existing.content },
+        });
+        rebuildMemoryGraph(db, learnerId);
       });
-      rebuildMemoryGraph(db, learnerId);
       await this.persist(learnerId);
     }
     return this.dashboard(learnerId);
