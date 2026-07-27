@@ -25,11 +25,22 @@ export function CameraObserver({ enabled, onMovementChange }: Props) {
     let cancelled = false;
     let timer: number | undefined;
 
+    const stopStream = (stream?: MediaStream | null) => {
+      stream?.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {
+          // Track may already be stopped.
+        }
+      });
+    };
+
     async function start() {
       setStatus('starting');
+      let acquiredStream: MediaStream | null = null;
       try {
         if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera API is unavailable.');
-        const stream = await navigator.mediaDevices.getUserMedia({
+        acquiredStream = await navigator.mediaDevices.getUserMedia({
           video: {
             width: { ideal: 320 },
             height: { ideal: 240 },
@@ -39,15 +50,19 @@ export function CameraObserver({ enabled, onMovementChange }: Props) {
           audio: false,
         });
         if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop());
+          stopStream(acquiredStream);
           return;
         }
-        streamRef.current = stream;
+        streamRef.current = acquiredStream;
         const video = videoRef.current;
         if (!video) throw new Error('Camera preview is unavailable.');
-        video.srcObject = stream;
+        video.srcObject = acquiredStream;
         await video.play();
-        if (cancelled) return;
+        if (cancelled) {
+          video.srcObject = null;
+          stopStream(acquiredStream);
+          return;
+        }
         setStatus('on');
 
         timer = window.setInterval(() => {
@@ -77,6 +92,10 @@ export function CameraObserver({ enabled, onMovementChange }: Props) {
           previousFrame.current = new Uint8ClampedArray(current);
         }, 700);
       } catch {
+        stopStream(acquiredStream);
+        if (streamRef.current === acquiredStream) streamRef.current = null;
+        const video = videoRef.current;
+        if (video) video.srcObject = null;
         if (!cancelled) {
           setStatus('error');
           setMovement(0);
@@ -91,7 +110,7 @@ export function CameraObserver({ enabled, onMovementChange }: Props) {
       if (timer !== undefined) window.clearInterval(timer);
       const video = videoRef.current;
       if (video) video.srcObject = null;
-      streamRef.current?.getTracks().forEach((track) => track.stop());
+      stopStream(streamRef.current);
       streamRef.current = null;
       previousFrame.current = null;
       smoothedMovement.current = 0;
