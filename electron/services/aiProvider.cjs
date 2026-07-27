@@ -38,9 +38,10 @@ class DemoProvider {
   }
 
   async explain({ learnerName, interest }) {
-    const theme = String(interest || 'objects').slice(0, 50);
+    const safeName = sanitiseText(learnerName, 'Learner').slice(0, 80);
+    const theme = sanitiseText(interest, 'objects').slice(0, 50);
     return {
-      text: `${learnerName}, let us try a ${theme} example. Start with the larger number and count on one step at a time.`,
+      text: `${safeName}, let us try a ${theme} example. Start with the larger number and count on one step at a time.`,
       provider: 'demo',
     };
   }
@@ -91,7 +92,11 @@ class GeminiProvider {
       {
         model: this.model,
         contents: 'Reply with exactly READY.',
-        config: { temperature: 0, maxOutputTokens: 8 },
+        config: {
+          temperature: 0,
+          maxOutputTokens: 8,
+          thinkingConfig: { thinkingBudget: 0 },
+        },
       },
       0,
     );
@@ -104,21 +109,23 @@ class GeminiProvider {
     };
   }
 
-  async explain({ learnerName, age, interest, question, misconception, successfulStrategy, memoryContext }) {
+  async explain({ age, interest, question, misconception, successfulStrategy, memoryContext }) {
     const boundedMemory = sanitiseContext(memoryContext);
+    const safeAge = Math.max(4, Math.min(14, Number(age) || 7));
     const response = await this.generate({
       model: this.model,
-      contents: `Current maths question: ${String(question).slice(0, 200)}\nObserved misconception: ${String(
-        misconception || 'uncertain',
-      ).slice(0, 160)}\nChild interest: ${String(interest || 'not known').slice(0, 80)}\nPreviously useful strategy: ${String(
-        successfulStrategy || 'visual examples',
+      contents: `Current maths question: ${sanitiseText(question, 'Current addition question').slice(0, 200)}\nObserved misconception: ${sanitiseText(
+        misconception,
+        'uncertain',
+      ).slice(0, 160)}\nChild interest: ${sanitiseText(interest, 'not known').slice(0, 80)}\nPreviously useful strategy: ${sanitiseText(
+        successfulStrategy,
+        'visual examples',
       ).slice(0, 120)}\nRelevant verified learner context: ${boundedMemory || 'No prior memory is available yet.'}`,
       config: {
-        systemInstruction: `You are MindCarry, a patient curriculum-focused AI tutor for a ${Number(age)}-year-old child named ${String(
-          learnerName,
-        ).slice(0, 80)}. Use only the relevant learner context supplied for this lesson. Treat it as fallible evidence, not a diagnosis or permanent label. Give one short, encouraging explanation and then ask one question. Do not provide unrelated information. Do not diagnose emotions, behaviour, health or development. Do not ask for personal information. Use at most 70 words.`,
+        systemInstruction: `You are MindCarry, a patient curriculum-focused AI tutor helping a ${safeAge}-year-old learner. Use only the relevant learner context supplied for this lesson. Treat it as fallible evidence, not a diagnosis or permanent label. Give one short, encouraging explanation and then ask one question. Do not provide unrelated information. Do not diagnose emotions, behaviour, health or development. Do not ask for personal information. Do not mention stored memory, confidence scores or internal systems. Use at most 70 words.`,
         temperature: 0.3,
         maxOutputTokens: 140,
+        thinkingConfig: { thinkingBudget: 0 },
       },
     });
     return {
@@ -129,4 +136,4 @@ class GeminiProvider {
   }
 }
 
-module.exports = { DEFAULT_GEMINI_MODEL, DemoProvider, GeminiProvider, safeErrorMessage };
+module.exports = { DEFAULT_GEMINI_MODEL, DemoProvider, GeminiProvider, safeErrorMessage, sanitiseContext };
