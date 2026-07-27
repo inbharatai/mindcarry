@@ -5,6 +5,7 @@ const invoke = (channel, payload) => ipcRenderer.invoke(channel, payload);
 contextBridge.exposeInMainWorld('mindcarry', {
   app: {
     status: () => invoke('app:status'),
+    openDataFolder: () => invoke('app:openDataFolder'),
   },
   settings: {
     setGeminiKey: (apiKey) => invoke('settings:setGeminiKey', { apiKey }),
@@ -23,5 +24,6 @@ contextBridge.exposeInMainWorld('mindcarry', {
   lessons: {
     start: (learnerId) => invoke('lesson:start', { learnerId }),
     answer: (payload) => invoke('lesson:answer', payload),
+    cancel: (sessionId) => invoke('lesson:cancel', { sessionId }),
   },
 });
