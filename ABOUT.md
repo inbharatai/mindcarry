@@ -4,178 +4,149 @@
 
 MindCarry is a local-first AI tutor being built for children aged 5–10 learning foundational reading, writing and maths.
 
-A good tutor does more than explain a lesson. Over time, the tutor understands how one child reasons, where the child hesitates, which mistakes recur, what motivates the child and which explanation finally makes a concept clear.
+A useful tutor does more than answer a question. Over time, it should understand what one learner has mastered, which misconceptions recur, whether an answer was independent, which representation helped and what should be reviewed next.
 
-MindCarry is designed to preserve that understanding in a private, encrypted Learner Memory controlled by the family.
+MindCarry preserves that understanding in a private, encrypted Learner Memory controlled by the family.
 
 ## The problem
 
-Most learning products can personalise a session, recommend an exercise or save a score. Their deeper learner model is often fragmented across applications or tied to one provider’s cloud.
+Learning context is often fragmented across sessions, applications or one provider’s cloud. When a family changes device, application or model provider, the learner may have to begin again.
 
-When a family changes device, application or AI provider, the child may have to begin again.
-
-MindCarry is being built so the learner’s accumulated context remains:
+MindCarry is designed so accumulated context remains:
 
 - private;
 - encrypted;
 - portable;
-- parent-controlled;
+- parent-visible and parent-controlled;
 - independent of one AI provider.
 
-## How MindCarry is different
-
-MindCarry separates the intelligence engine from the persistent learner record.
+## How MindCarry works
 
 ```text
-Validated learning evidence
+Validated lesson evidence
         ↓
 Parent-facing Memory Inbox
         ↓
-Local explained learner graph
+Deterministic local learner graph
         ↓
-Bounded context for the selected AI provider
+Ranked and bounded context
+        ↓
+Optional AI provider for short teaching wording
 ```
 
-Gemini is the first optional provider. It can generate short alternative explanations, but it is not the permanent source of truth. Correctness, lesson state and permanent memory writes remain controlled by MindCarry.
-
-The learner database remains local and can be exported as one encrypted `.childmind` package for another supported installation.
+Correctness, lesson state, mastery and permanent memory writes remain controlled by MindCarry. Gemini is the first optional provider; it is not the source of truth.
 
 ## Memory Inbox
 
-Parents can review what MindCarry remembers in understandable language. Each memory item shows:
+Parents can see:
 
-- observation type;
-- confidence;
-- evidence count;
-- source lesson;
-- confirmation date;
-- active or archived status.
+- memory type/content;
+- confidence and evidence count;
+- source lesson and date;
+- graph connections;
+- active/archive state.
 
-A parent can archive an item so it is excluded from future lesson context and restore it later. Editing, permanent deletion and secure erasure remain future release gates.
+A parent may archive an item so it is excluded from future context. Repeated evidence may reinforce it but does not silently reactivate it. Restore is explicit. Editing and permanent deletion remain future gates.
 
 ## Local learner graph
 
-MindCarry connects learner evidence through a small embedded graph stored inside the encrypted learner database.
+The graph is embedded in the encrypted learner database. It connects learner, skills, interests, memories and sessions through explicit relations with confidence, evidence, source and provenance.
 
-Current graph concepts include:
+It requires no cloud graph database, graph server, Graphify integration or canonical vector store.
 
-- learner;
-- skill;
-- interest;
-- memory;
-- session.
+## Provider-independent context
 
-Relationships include skill evidence, misconceptions, useful strategies, interests and source lessons. Every relationship records confidence, evidence count and explained provenance.
+Before a lesson, MindCarry ranks active evidence using objective/skill overlap, memory type, evidence, confidence, recency and review state. It selects at most eight memories, twelve graph facts and 1,800 characters.
 
-The graph does not require a cloud graph database, separate graph server or permanent provider-specific embedding index.
+The parent-visible context and provider-safe context are separate. Gemini does not receive the child’s name, complete database, complete graph, passphrase, API key or raw media.
 
 ## Honest current status
 
 MindCarry is **pre-MVP**.
 
-Completed repository work includes:
+Implemented repository work includes:
 
-- product specification;
-- initial tutoring flow;
-- encrypted Learner Memory schema;
-- parent-facing Memory Inbox;
-- deterministic local learner graph;
-- bounded provider-independent context packet;
-- portability design and `.childmind` implementation;
-- desktop implementation code;
-- automated encryption, vault, lesson, graph and portability tests;
-- Windows installation and local-verification scripts.
+- hardened Electron desktop shell;
+- automatic encrypted vault and device catalogue;
+- one addition-within-20 tutoring vertical slice;
+- typed and supported OS/browser speech input;
+- optional local movement experiment;
+- Memory Inbox, lifecycle events and deterministic graph;
+- ranked, de-identified provider context;
+- Gemini test-key adapter and deterministic fallback;
+- strict encrypted `.childmind` portability;
+- main-only Windows setup, deterministic dependencies, CI and CodeQL;
+- encryption, security, lesson, memory, graph and transfer tests.
 
-The codebase is not the same as a validated functioning product. The next milestone is to install it on the target Windows computer, run the complete application, add a real Gemini test key, verify microphone and optional camera permissions, complete the lesson, inspect the Inbox and graph, restart the application and transfer the encrypted memory between two installations.
+The codebase is not the same as a validated functioning product. The next milestone is a clean founder-device run covering every UI screen, real Gemini success/failure, microphone/camera permissions, restart behaviour and transfer between two actual installations.
 
-## First prototype
+## First prototype objective
 
-The first prototype is intentionally narrow. It should:
+The first prototype must demonstrate that MindCarry can:
 
 1. conduct a short voice-enabled maths lesson;
-2. identify a child’s misconception;
+2. identify a simple misconception;
 3. change the teaching representation;
-4. check independent understanding with a transfer question;
-5. write structured evidence to the encrypted local Learner Memory;
-6. update the Memory Inbox and local graph;
-7. close and reopen without losing learner state;
-8. export the memory as a `.childmind` package;
-9. import it into another installation and resume with the same context.
+4. require independent transfer evidence;
+5. write structured evidence into encrypted local memory;
+6. update the Inbox and graph;
+7. select relevant context for the next lesson;
+8. survive restart;
+9. export/import the complete encrypted record without transferring API/device keys.
 
 ## Automatic storage
 
-Parents should not create, name or connect folders manually.
+Parents do not create, name or connect technical folders. MindCarry automatically creates the vault, encrypted catalogue, UUID learner folder, encrypted database, backups, reserved media boundaries and export/recovery locations.
 
-MindCarry automatically creates the application vault, encrypted learner catalogue, isolated learner directory, encrypted database, backups, reserved media locations, temporary session storage and export location.
+Child name, age, interests, goal, lessons, memories and graph are not stored in plaintext technical manifests.
 
-The Memory Inbox, event ledger and graph live inside the encrypted learner database. Learner names and ages are not stored in plaintext manifests.
+## Multimodal direction
 
-## Multimodal personalisation
+With explicit parental consent, future MindCarry versions may use speech, pronunciation, reasoning, response time, hint usage and repeated observable engagement cues to select teaching actions.
 
-The long-term direction includes learning from more than correct and incorrect answers.
-
-With explicit parental permission, MindCarry may use voice, pronunciation, spoken reasoning, response time, repeated hint usage and observable engagement cues to choose a teaching action.
-
-These cues must not be treated as certain emotional states or used to diagnose mental health, attention disorders or developmental conditions.
-
-The current camera experiment only measures frame-to-frame movement intensity locally. It does not perform face recognition, identity matching or emotion inference, and it does not store raw video.
+These cues must not be treated as certain emotional states or used for medical, developmental or attention diagnosis. The current camera experiment calculates only local frame-to-frame movement intensity and stores no raw video.
 
 ## Product principles
 
-### 1. The Learner Memory belongs to the family
+### Family ownership
 
-The child’s progress and learning history should not depend on one cloud provider.
+The learner record should remain with the family rather than one cloud provider.
 
-### 2. The AI model is replaceable
+### Replaceable models
 
-Gemini is the first optional provider. Another API or local model should be able to use the same bounded context from the same Learner Memory later.
+Gemini is optional. Another supported API or local model should be able to consume the same bounded context.
 
-### 3. Personalisation requires evidence
+### Evidence before personalisation
 
-MindCarry should not create permanent conclusions from one answer, expression or session. Stable memories should be supported by repeated observations.
+Stable memory should require structured/repeated evidence, not one expression, answer or model claim.
 
-### 4. Parents need visibility and control
+### Parent visibility and control
 
-Parents should be able to see why a memory exists, archive it from future use and eventually correct or delete it.
+Parents should understand why an item exists and control whether it is used.
 
-### 5. Teaching is different from answering
+### Teaching, not answer generation
 
-The tutor should diagnose, explain, ask the child to reason, check independent understanding and plan what comes next. It should not merely provide homework answers.
+The tutor should assess, explain, ask for reasoning, check transfer and plan review—not simply provide homework answers.
 
-### 6. Child safety is a product requirement
+### Child safety by design
 
-Camera and microphone access must be visible, optional and parent-controlled. Sensitive data should not be retained by default.
+Camera/microphone use must be visible, optional and consent-bound. Raw sensitive media is not retained by default.
 
-### 7. Accuracy is more important than hype
+### Accuracy before hype
 
-Implemented code, automated verification, device testing and long-term vision must always be described separately.
+Repository implementation, automated tests, target-device evidence and future vision must always be described separately.
 
-## Initial product focus
+## Product focus
 
-MindCarry is initially focused on early English reading and foundational maths, with writing in a later phase.
-
-The first implementation concentrates on addition within 20 because it provides a small, measurable environment for testing the complete learner-memory loop.
-
-## Long-term direction
-
-The goal is a private learning companion that becomes more useful over time because it understands:
-
-- what the child has mastered;
-- what the child repeatedly misunderstands;
-- how the child explains an answer;
-- which examples improve comprehension;
-- when a skill should be reviewed;
-- how the child learns most effectively.
-
-The AI provider may change. The device may change. The application may evolve. The learner’s accumulated context should continue with the family.
+The long-term product targets foundational reading, writing and maths. The current implementation covers only addition within 20 so the complete learner-memory loop can be tested in a small, measurable environment.
 
 ## Positioning
 
-**GitHub About description**
+**GitHub About**
 
 > Local-first AI tutor with encrypted, portable and family-controlled Learner Memory.
 
-**Short product description**
+**Product description**
 
 > AI tutor with child-owned lifelong learner memory.
 
