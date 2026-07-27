@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 
@@ -24,10 +25,10 @@ describe('runtime security helpers', () => {
   });
 
   it('trusts only the packaged index file in production', () => {
-    const productionFile = path.resolve('/tmp/mindcarry/dist/index.html');
-    expect(trustedRendererUrl(`file://${productionFile}`, { productionFile })).toBe(true);
-    expect(trustedRendererUrl('file:///tmp/mindcarry/dist/other.html', { productionFile })).toBe(false);
-    expect(trustedRendererUrl('file:///etc/passwd', { productionFile })).toBe(false);
+    const productionFile = path.resolve('dist/index.html');
+    const otherFile = path.resolve('dist/other.html');
+    expect(trustedRendererUrl(pathToFileURL(productionFile).href, { productionFile })).toBe(true);
+    expect(trustedRendererUrl(pathToFileURL(otherFile).href, { productionFile })).toBe(false);
     expect(trustedRendererUrl('https://example.com/', { productionFile })).toBe(false);
   });
 
