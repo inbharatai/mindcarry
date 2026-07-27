@@ -1,189 +1,193 @@
-# First end-to-end acceptance test
+# Founder-device end-to-end acceptance test
 
-This is a test script, not a marketing walkthrough. Record every failure, screenshot the error and do not claim the prototype works until all required stages pass.
+This is a verification script, not a marketing walkthrough. Use synthetic learner details, record every failure and do not describe MindCarry as a functioning prototype until all mandatory stages pass.
 
 ## Test environment
 
-- Windows 10 or 11
-- Node.js 22.12 or newer
-- Git
-- working microphone
-- optional working webcam
-- Gemini test API key
-- internet connection
-- second Windows user profile, VM or separate installation directory for portability testing
+- clean Windows 10/11 user profile or VM;
+- Node.js 22.12 or newer;
+- Git and `winget` where automatic prerequisite installation is tested;
+- working microphone;
+- optional webcam;
+- revocable Gemini test API key;
+- internet connection plus an offline/failure test;
+- second clean Windows/app-data environment for transfer testing.
 
-## Stage 1: automated installation
+## 1. Main-only installation
 
-1. Run `INSTALL_TO_DESKTOP.ps1` from a trusted local copy.
-2. Confirm it creates:
+1. Run the README PowerShell installation command.
+2. Confirm the source is created at:
 
 ```text
 C:\Users\<user>\Desktop\MindCarry
 ```
 
-3. Confirm dependency installation completes.
-4. Confirm lint, smoke tests, unit/integration tests and production build all pass.
-5. Confirm MindCarry opens.
+3. Confirm `git branch --show-current` returns `main`.
+4. Confirm `package-lock.json` exists.
+5. Confirm setup uses `npm ci`.
+6. Confirm lint, smoke, unit/integration and production build pass before launch.
+7. Confirm the application opens.
+8. Retain both setup logs.
 
-**Pass condition:** the application opens only after the verification pipeline succeeds.
+**Pass:** clean main-only installation launches only after verification.
 
-## Stage 2: automatic vault creation
+## 2. Secure vault and credential backend
 
 1. Open **Settings**.
-2. Confirm **Vault ready** appears.
-3. Note the displayed runtime vault path.
-4. Select **Open vault folder**.
-5. Confirm the following exist without manual creation:
+2. Confirm **Vault ready**.
+3. Confirm the secure-storage backend reports `dpapi` on Windows.
+4. Open the displayed vault folder.
+5. Confirm the automatic structure contains `learners`, `exports`, `backups`, `recovery`, `temp`, `learner-catalog.enc`, `settings.json` and `vault.json`.
+6. Confirm no runtime folder was selected or created by the parent.
 
-```text
-MindCarryVault/
-├── learners/
-├── exports/
-├── backups/
-├── recovery/
-├── temp/
-├── learner-catalog.enc
-├── settings.json
-└── vault.json
-```
+**Pass:** vault is automatic and OS credential protection is acceptable.
 
-**Pass condition:** the parent did not create or select any runtime folder.
-
-## Stage 3: create the learner
+## 3. Synthetic learner creation
 
 Create:
 
-- preferred name: `Aarav`
-- age: `7`
-- language: `English`
-- interest: `dinosaurs`
-- goal: `Build confidence in foundational maths.`
-- camera: off for the first run
-- parent passphrase: a new test-only passphrase of at least 12 characters
+```text
+preferred name: Aarav
+age: 7
+language: English
+interest: dinosaurs
+parent goal: Build confidence in foundational maths.
+camera: off
+passphrase: unique test-only value of at least 12 characters
+```
 
-After creation:
+Then:
 
-1. Confirm one UUID-named directory appears under `learners/`.
-2. Confirm it contains `manifest.json`, `learner.db.enc` and the reserved subfolders.
-3. Open `manifest.json` in a text editor.
-4. Confirm it does not contain `Aarav`, age `7`, `dinosaurs` or the parent goal.
-5. Search `learner.db.enc` as text.
-6. Confirm it does not expose the profile as readable plaintext.
+1. Confirm one UUID folder appears under `learners`.
+2. Confirm `manifest.json`, `learner.db.enc` and reserved folders exist.
+3. Search plaintext files for `Aarav`, `dinosaurs`, age and goal.
+4. Confirm those values are not present in `manifest.json` or readable database text.
+5. Confirm the learner appears on the home screen through the encrypted catalogue.
+6. Test an incorrect passphrase and confirm unlock fails.
 
-**Pass condition:** all folders were automatic and personal fields are not present in plaintext technical files.
+**Pass:** learner identity is usable in the UI but absent from plaintext technical storage.
 
-## Stage 4: demo-mode lesson
+## 4. Deterministic lesson and concurrency
 
-1. Keep MindCarry in deterministic demo mode.
-2. Unlock Aarav with the parent passphrase.
-3. Start the maths lesson.
-4. For `7 + 5`, answer `11`.
-5. In the reasoning field, write: `I counted the objects but stopped one early.`
-6. Confirm MindCarry identifies an off-by-one counting error and gives a counting-on intervention.
-7. Answer the second question correctly without a hint.
-8. Answer the final transfer question correctly without a hint.
-9. Confirm the session completes only after the transfer question.
-10. Confirm the dashboard shows:
-    - a completed session;
-    - mastery evidence;
-    - a misconception memory;
-    - an independent transfer memory.
+1. Keep demo mode active.
+2. Unlock Aarav and start the lesson.
+3. For `7 + 5`, answer `11` and explain that counting stopped early.
+4. Confirm the off-by-one classification and counting-on intervention.
+5. For `8 + 3`, answer `11` without a hint.
+6. For the transfer question `9 + 6`, answer `15` without a hint.
+7. Confirm completion occurs only after independent transfer.
+8. During a separate run, double-click **Check my thinking** and confirm only one attempt is recorded.
+9. During another run, start/leave/start quickly and confirm only one lesson remains active.
+10. Lock during an unfinished lesson and confirm it is cancelled, not left active.
 
-**Pass condition:** deterministic assessment and persistent memory work without Gemini.
+**Pass:** deterministic assessment is correct and duplicate UI actions do not corrupt evidence.
 
-## Stage 5: restart persistence
+## 5. Memory Inbox and graph
 
-1. Lock Aarav.
+After completing a lesson:
+
+1. Open **Memory Inbox**.
+2. Confirm skill/misconception memories show confidence, evidence count and source lesson.
+3. Confirm learner, skill, interest, memory and session nodes appear.
+4. Confirm relations display provenance.
+5. Confirm the parent-visible context preview is bounded.
+6. Archive one memory.
+7. Start another lesson and confirm the archived item is absent from selected context.
+8. Complete matching evidence again and confirm the item remains archived while evidence count increases.
+9. Restore it explicitly and confirm it returns to future context.
+
+**Pass:** parent control is respected and graph/context updates are explainable.
+
+## 6. Restart persistence
+
+1. Lock the learner.
 2. Close MindCarry completely.
-3. Start MindCarry again.
-4. Confirm Aarav appears in the learner list.
-5. Unlock with the same passphrase.
-6. Confirm the completed session and memories remain.
-7. Confirm an incorrect passphrase does not open the learner.
+3. Restart it.
+4. Unlock with the original passphrase.
+5. Confirm sessions, mastery, Inbox, archive state, graph and context remain.
+6. Force-close during an unfinished session and record actual recovery behaviour.
 
-**Pass condition:** learner state survives process restart and wrong-passphrase access fails safely.
+**Pass:** completed state survives restart. Any crash-recovery limitation is documented as a defect/gate.
 
-## Stage 6: Gemini connection
+## 7. Gemini test-key boundary
 
 1. Open Settings.
-2. Paste the Gemini test API key.
+2. Paste the test key only into the masked field.
 3. Select **Save securely and test Gemini**.
-4. Confirm the connection test returns success.
-5. Confirm the app reports Gemini and model `gemini-2.5-flash`.
-6. Run another lesson and deliberately answer the first question incorrectly.
-7. Confirm the reteaching explanation is generated and remains short and relevant.
-8. Disconnect the internet or use an invalid/revoked test key in a separate test.
-9. Confirm the lesson continues with deterministic fallback rather than losing learner data.
-10. Remove the Gemini key and confirm demo mode returns.
+4. Confirm provider and `gemini-2.5-flash` status.
+5. Deliberately answer incorrectly and confirm the explanation is short and relevant.
+6. Inspect available network/debug evidence using synthetic data and confirm the child name is not in the provider request.
+7. Confirm selected context is capped and the complete database/graph is not sent.
+8. Test disconnected internet, revoked key, timeout/rate-limit conditions where feasible.
+9. Confirm deterministic fallback continues without losing evidence.
+10. Remove the key and confirm demo mode returns.
+11. Confirm no key appears in repository, logs, vault learner folders or exports.
 
-**Pass condition:** model success and failure paths are both safe.
+**Pass:** provider success and failure are safe, minimised and de-identified.
 
-## Stage 7: microphone consent
+## 8. Microphone and speech
 
 1. Use a learner with microphone consent enabled.
-2. Start a lesson and use the microphone button.
-3. Confirm the operating-system permission flow appears when required.
-4. Speak `twelve` and confirm it is transcribed into the answer field.
-5. Use a learner whose microphone permission is disabled.
-6. Confirm the microphone button cannot start recognition and typing remains available.
+2. Speak `Seven plus five is twelve`.
+3. Confirm the final answer `12` is selected rather than the first number.
+4. Confirm speech output uses the learner language code.
+5. Deny microphone permission and confirm typed input remains usable.
+6. Use a learner with microphone disabled and confirm recognition cannot start.
+7. Exit mid-recognition and confirm it stops without an error loop.
 
-**Pass condition:** microphone use follows learner consent and has a typed fallback.
+**Pass:** speech is consent-bound, robust and has a typed fallback.
 
-## Stage 8: optional camera consent
+## 9. Optional camera
 
-Use a synthetic test profile only.
+Use synthetic data only.
 
-1. Create a learner with camera observation enabled.
-2. Start a lesson.
-3. Confirm the camera preview appears only during the lesson.
-4. Confirm the movement value changes when the person moves.
-5. Confirm no raw video file appears in the vault.
-6. Cancel the lesson and confirm the camera stops.
-7. Lock the learner and confirm the camera cannot continue.
-8. Repeat with camera consent disabled and confirm access is denied/off.
+1. Create a camera-enabled learner.
+2. Confirm preview appears only during the active lesson.
+3. Confirm movement changes the local numeric cue.
+4. Confirm no raw video appears in the vault.
+5. Cancel, lock and navigate away; confirm the camera indicator turns off.
+6. Simulate camera denial/unavailable device/playback error and confirm tracks stop.
+7. Repeat with camera disabled.
 
-**Pass condition:** camera activity is local, visible, consent-bound and not retained as raw video.
+**Pass:** camera use is visible, local, consent-bound and cleaned up on every exit/error path.
 
-## Stage 9: export
+## 10. Export integrity
 
-1. Unlock Aarav.
-2. Select **Export encrypted .childmind**.
-3. Save to the default exports directory or another chosen location.
-4. Confirm the file extension is `.childmind`.
-5. Open the package as text.
-6. Confirm it does not contain:
-    - Gemini API key;
-    - `Aarav`;
-    - parent goal;
-    - readable lesson history.
-7. Confirm modifying the encrypted payload causes import integrity validation to fail.
+1. Select **Download complete memory**.
+2. Confirm `.childmind` extension and UUID-based default name.
+3. Open the JSON package as text.
+4. Confirm it does not reveal child name, goal, readable history, passphrase or Gemini key.
+5. Add whitespace to the encrypted base64 or alter its payload/checksum.
+6. Confirm import rejects it.
+7. Set an unsupported schema version and confirm rejection.
 
-**Pass condition:** the export is portable but does not expose plaintext learner PII or credentials.
+**Pass:** export is encrypted, minimally described and strictly validated.
 
-## Stage 10: second-installation import
+## 11. Clean second-installation import
 
-1. Install MindCarry in a second Windows profile, VM or clean app-data environment.
-2. Import the original `.childmind` package.
-3. Confirm the home screen initially shows **Imported learner** rather than trusting plaintext identity metadata.
-4. Enter the original parent passphrase.
-5. Confirm the profile resolves to Aarav after successful decryption.
-6. Confirm the previous session and learner memories are present.
-7. Start another lesson and confirm the same learner context is available.
-8. Confirm the receiving installation does not inherit the first device’s Gemini key.
+1. Install from `main` in a separate clean environment.
+2. Import the original unmodified `.childmind`.
+3. Confirm **Imported learner** appears before unlock.
+4. Unlock with the original passphrase.
+5. Confirm name, sessions, Inbox, evidence counts, graph and context return.
+6. Start a new lesson and confirm relevant context is available.
+7. Confirm Gemini key and device catalogue key did not transfer.
 
-**Pass condition:** learning context moves, while device credentials and AI credentials do not.
+**Pass:** learner context moves while device/provider credentials do not.
 
-## Final evidence to retain
+## Evidence to retain
 
-- setup log;
-- CI link and commit SHA;
-- screenshot of vault structure with UUID only;
-- screenshot of non-personal manifest;
-- lesson completion screen;
-- restart persistence screen;
-- Gemini success and fallback result;
-- export/import result;
-- list of defects found and fixed.
+- commit SHA and CI/CodeQL links;
+- installation and setup logs;
+- secure backend and vault screenshots;
+- non-personal manifest search evidence;
+- lesson and duplicate-action result;
+- Memory Inbox/graph/archive/restore result;
+- restart result;
+- Gemini success/failure and request-minimisation evidence;
+- microphone/camera consent and cleanup evidence;
+- tampered-export rejection;
+- second-install transfer result;
+- defect register with severity, reproduction and fix status.
 
-Use synthetic learner details in all screenshots shared publicly.
+Do not publish real API keys, real child data, passphrases, vault paths containing personal usernames or `.childmind` files.

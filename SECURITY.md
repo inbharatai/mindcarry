@@ -1,29 +1,29 @@
 # Security policy
 
-MindCarry handles child-related learning data and should be treated as security-sensitive software.
+MindCarry handles child-related learning data and must be treated as security-sensitive software.
 
-## Supported versions
+## Supported code
 
-MindCarry is currently pre-MVP. No version is approved for production child use.
+MindCarry is pre-MVP. No version is approved for production child use.
 
-Security fixes are applied to the latest `main` branch and active audit branches. Older commits and prototype packages should not be considered supported releases.
+Security fixes are maintained only on the latest `main` branch. Older commits, old branches, local ZIP files, unsigned installers and prototype packages are not supported releases.
 
-## Reporting a vulnerability
+## Report privately
 
-Do not open a public GitHub issue containing:
+Do not open a public issue containing:
 
-- an exploitable security flaw;
-- API credentials;
+- an exploitable vulnerability;
+- API credentials or passphrases;
 - child or parent data;
-- decrypted learner files;
-- screenshots containing personal information;
-- detailed steps that could put users at risk before a fix is available.
+- decrypted learner files or `.childmind` packages;
+- screenshots with personal information;
+- weaponised reproduction details before remediation.
 
 Send a private report to:
 
 **reetu004@gmail.com**
 
-Use the subject:
+Subject:
 
 ```text
 MindCarry Security Report
@@ -31,42 +31,49 @@ MindCarry Security Report
 
 Include:
 
-- affected commit or version;
-- operating system;
-- clear reproduction steps;
+- affected commit/version;
+- operating system and MindCarry installation method;
+- clear synthetic-data reproduction steps;
 - expected and actual behaviour;
-- impact assessment;
-- proof of concept with synthetic data only;
-- suggested mitigation when available.
+- security/privacy impact;
+- proof of concept using only systems/data you control;
+- suggested mitigation where available.
 
 ## Response expectations
 
-Because this is a founder-led pre-MVP project, response times are not yet covered by a formal SLA. Reports should be acknowledged as soon as reasonably possible, triaged before public discussion and fixed before the affected feature is used with real child data.
+MindCarry is founder-led and has no formal vulnerability-response SLA yet. Reports should be acknowledged as soon as reasonably possible, triaged before public discussion and fixed before the affected feature is used with real child data.
 
-## Scope priorities
+## Priority areas
 
-Highest-priority reports include:
-
-- learner database decryption without the parent passphrase;
-- API-key exposure;
-- plaintext learner PII outside the intended encrypted boundary;
-- arbitrary filesystem access from the renderer;
-- Electron remote-code execution;
-- bypass of parent camera or microphone consent;
-- malicious `.childmind` import leading to code execution or path traversal;
-- cross-learner data access;
-- unsafe model output reaching a child despite the teaching boundary;
-- export packages containing operating-system secrets or API keys.
+- learner decryption without the parent passphrase;
+- API/device key disclosure;
+- plaintext learner PII outside the encrypted boundary;
+- renderer escape, arbitrary IPC/filesystem access or Electron code execution;
+- insecure credential-backend acceptance;
+- cross-learner or cross-session access;
+- bypass of parent camera/microphone consent;
+- camera/microphone continuing after exit/error;
+- malicious `.childmind` path traversal, resource exhaustion or code execution;
+- checksum/schema/package-validation bypass;
+- parent archive-state bypass;
+- complete learner DB/name/raw media reaching an AI provider;
+- unsafe generated output bypassing the deterministic teaching boundary;
+- export containing API/OS secrets.
 
 ## Research rules
 
-- use only accounts, devices and synthetic learner records you control;
-- do not access another person’s data;
-- do not retain or publish child data;
-- do not perform denial-of-service testing against third-party APIs;
-- do not attempt social engineering;
-- allow reasonable time for remediation before disclosure.
+- use only accounts, devices, API projects and synthetic learner records you control;
+- never access, retain or publish another person’s data;
+- never use real-child data in proofs of concept;
+- do not perform denial-of-service testing against third-party services;
+- do not social-engineer users or maintainers;
+- minimise data collection and delete test artefacts securely;
+- allow reasonable remediation time before coordinated disclosure.
 
-## Secrets accidentally committed
+## Secrets accidentally exposed
 
-A committed secret must be treated as compromised even after the file is deleted. Revoke or rotate it immediately, remove it from history when appropriate and review logs for misuse.
+Any committed, pasted, logged or screenshotted secret must be treated as compromised even after deletion. Revoke/rotate it immediately, remove it from history where appropriate and review provider/account logs for misuse.
+
+## Security status
+
+Repository tests, dependency auditing and CodeQL are safeguards, not certification. Before public child use MindCarry still requires independent application-security testing, model red-teaming, safeguarding/privacy/legal review, signed releases, secure updates and incident-response procedures.

@@ -1,174 +1,221 @@
-# MindCarry Memory Inbox and Local Learner Graph
+# Memory Inbox and Local Learner Graph
 
-## Decision
+## Architecture decision
 
-MindCarry will keep the child's canonical learning memory **local, encrypted, portable and independent of the AI provider**.
+MindCarry keeps canonical learner memory **local, encrypted, portable and independent of the AI provider**.
 
-The parent-facing product is a **Memory Inbox**. Underneath it, MindCarry maintains an evidence ledger and a deterministic local graph that connects the learner, skills, interests, lesson sessions and validated memory observations.
+The parent-facing product is a **Memory Inbox**. Underneath it, MindCarry maintains:
 
-This is inspired by the useful principles of code knowledge graphs—local deterministic extraction, queryable relationships and explained provenance—but MindCarry does **not** embed Graphify or send the learner database to an external graph service. Graphify maps codebases. MindCarry's runtime data is already structured, so a small embedded graph inside the encrypted SQLite database is more accurate, private and maintainable.
+1. a structured evidence ledger;
+2. memory lifecycle events;
+3. a deterministic local graph;
+4. a ranked, bounded context selector.
 
-## Product experience
+MindCarry does not embed Graphify or send learner data to an external graph service. Graphify’s useful ideas—deterministic extraction, queryable relationships and provenance—are applied through purpose-built SQLite tables because MindCarry’s lesson data is already structured.
 
-Parents should only need to:
+## Parent experience
 
-1. Create the child profile.
-2. Choose a parent passphrase.
-3. Start a lesson.
-4. Open the Memory Inbox when they want to review what MindCarry remembers.
-5. Download one encrypted `.childmind` file when they want to back up or move the learner record.
+A parent should only need to:
 
-No parent creates folders, graph databases, indexes or configuration files.
+1. create the learner;
+2. choose a passphrase;
+3. complete lessons;
+4. review/archive/restore memories;
+5. download one encrypted `.childmind` when backing up or moving the record.
 
-## Canonical data layers
+No graph server, folder selection, vector database or configuration file is required.
 
-### 1. Evidence ledger
+## Canonical layers
 
-The source of truth remains the structured lesson evidence:
+### Evidence ledger
+
+Source-of-truth lesson records include:
 
 - question and answer;
 - correctness;
-- independent or prompted response;
-- response time;
-- misconception;
-- intervention;
+- independent/hint-assisted state;
+- bounded response time;
+- misconception and intervention;
+- reasoning observation;
 - transfer result;
-- source session and date.
+- source session/date.
 
-AI-generated prose is not allowed to become permanent truth without application validation.
+Provider prose cannot directly become permanent truth.
 
-### 2. Memory Inbox
+### Memory Inbox
 
-The inbox presents bounded observations such as:
+Memory types currently include skill, misconception, pedagogical strategy, preference and generic observation.
 
-- a demonstrated skill;
-- a recurring misconception;
-- a teaching strategy that appeared helpful;
-- a learning preference requiring more evidence.
+Each item includes:
 
-Every item includes confidence, evidence count, source lesson, confirmation date and graph-connection count. Parents can archive an item so it is excluded from future lesson context, and restore it later.
-
-### 3. Local Learner Graph
-
-The graph is stored in two encrypted-database tables:
-
-- `memory_graph_nodes`;
-- `memory_graph_edges`.
-
-Current node kinds:
-
-- learner;
-- skill;
-- interest;
-- memory;
-- session.
-
-Current relations:
-
-- `LEARNING_SKILL`;
-- `INTERESTED_IN`;
-- `SHOWED_SKILL_EVIDENCE`;
-- `SHOWED_MISCONCEPTION`;
-- `RESPONDED_TO_STRATEGY`;
-- `HAS_LEARNING_PREFERENCE`;
-- `HAS_OBSERVATION`;
-- `ABOUT_SKILL`;
-- `OBSERVED_DURING`.
-
-Every edge has:
-
+- content/type;
 - confidence;
 - evidence count;
-- source memory and session when applicable;
-- provenance: `EXTRACTED`, `DERIVED` or `PARENT`;
-- creation and update timestamps;
-- active state.
+- source lesson;
+- creation/confirmation/review dates;
+- active/archive state;
+- graph-connection count.
 
-## Provider-independent context loading
+Parent archive semantics are strict:
 
-Before a lesson, MindCarry creates a bounded **Learner Context Packet** from the local database. It contains:
+- archived items are excluded from future context and active graph edges;
+- repeated evidence may increase evidence/confidence;
+- repeated evidence does not reactivate the item;
+- only explicit restore reactivates it.
 
-- the current objective;
-- a small set of relevant skills;
-- up to eight active memory items;
-- up to twelve graph facts;
-- a short text summary.
+### Lifecycle ledger
 
-Only this selected packet may be supplied to an AI provider. The complete learner database, graph, passphrase and `.childmind` package are not sent.
+`memory_events` records `created`, `reinforced`, `archived` and `restored` events with source/details. Event and graph mutation is transactional.
 
-A new provider adapter can use the same packet, so changing Gemini to another API or a local model does not erase the learner context.
+### Local graph
+
+Tables:
+
+```text
+memory_graph_nodes
+memory_graph_edges
+```
+
+Node kinds:
+
+```text
+learner · skill · interest · memory · session
+```
+
+Relations:
+
+```text
+LEARNING_SKILL
+INTERESTED_IN
+SHOWED_SKILL_EVIDENCE
+SHOWED_MISCONCEPTION
+RESPONDED_TO_STRATEGY
+HAS_LEARNING_PREFERENCE
+HAS_OBSERVATION
+ABOUT_SKILL
+OBSERVED_DURING
+```
+
+Every edge stores confidence, evidence count, optional source memory/session, timestamps, active state and provenance:
+
+- `EXTRACTED` — explicit canonical record;
+- `DERIVED` — deterministic application rule;
+- `PARENT` — reserved for future parent confirmation.
+
+Node/edge IDs are deterministic. The graph is rebuilt from canonical records on creation, unlock and completed lesson.
+
+## Relevance ranking
+
+Before each lesson, active memory is ranked using:
+
+- objective-token overlap;
+- current-skill overlap;
+- memory-type weight;
+- evidence count;
+- confidence;
+- recency;
+- due-for-review bonus.
+
+Graph facts are ranked using objective/skill overlap, confidence and evidence.
+
+Current caps:
+
+```text
+8 memory items
+12 graph facts
+1,800 characters
+```
+
+The ranking score is retrieval metadata, not a judgement about the child.
+
+## Parent-visible and provider-safe context
+
+The context packet contains two text representations:
+
+- `summaryText` — local parent preview including explained graph facts;
+- `providerText` — de-identified provider version.
+
+For `providerText`:
+
+- learner-node labels become `Learner`;
+- the child’s name is not added to the model instruction;
+- only selected active evidence is included;
+- complete DB/Inbox/graph/session history is excluded;
+- passphrase, API key, raw media and `.childmind` are excluded.
+
+A provider adapter can consume the same packet, so changing Gemini to another supported provider does not erase the family’s canonical context.
 
 ## Portability
 
-The graph and inbox are stored inside the same encrypted learner database that is already exported inside the `.childmind` package. No separate graph folder or provider-specific embedding index is required.
+Inbox, lifecycle events and graph live inside the encrypted learner database carried by `.childmind`.
 
-On import:
+Import flow:
 
-1. Validate package size, format, learner UUID and checksum.
-2. Copy the still-encrypted database into the new local vault.
-3. Ask for the original parent passphrase.
-4. Decrypt and run SQLite integrity checks locally.
-5. Apply schema migrations.
-6. Rebuild the deterministic graph from canonical profile, skill and memory records.
-7. Create a fresh Learner Context Packet.
+1. validate total and encrypted-payload size;
+2. validate package/manifest/schema versions;
+3. validate UUID, canonical base64 and checksum;
+4. write the still-encrypted database into a new UUID folder;
+5. display **Imported learner**;
+6. ask for the original passphrase;
+7. authenticate/decrypt and verify SQLite identity/integrity/consent;
+8. migrate schema;
+9. rebuild graph and ranked context;
+10. update the receiving encrypted catalogue.
 
-## Why no vector store in phase one
+Gemini/device credentials do not travel.
 
-The permanent memory must not depend on one embedding provider or model version. Structured records and graph relationships are canonical. A future semantic index can be rebuilt locally and treated as disposable acceleration data.
+## Why no canonical vector store yet
 
-Phase one therefore uses:
+Permanent memory must not depend on one embedding provider/model version. Structured evidence and explicit graph relations are canonical. A future semantic index may be used only as disposable, locally rebuildable acceleration data.
+
+Current phase uses:
 
 - SQLite/SQL.js;
-- deterministic graph IDs;
-- explicit relationships;
-- bounded SQL retrieval;
+- deterministic IDs/relations;
+- bounded ranked SQL retrieval;
 - no cloud graph database;
 - no vector database;
 - no background upload.
 
-## Implemented in this branch
+## Implemented
 
 - schema version 3;
-- local `memory_events` audit ledger;
-- deterministic graph node and edge generation;
-- graph rebuild after learner creation, unlock and lesson completion;
-- parent-facing Memory Inbox;
-- archive and restore controls;
-- bounded context packet before each lesson;
-- Gemini prompt grounding with selected memory context;
-- `.childmind` portability of inbox and graph;
-- automated persistence and transfer tests;
-- provenance labels for graph edges.
+- Memory Inbox and lifecycle events;
+- deterministic graph/provenance;
+- relevance ranking and bounded context v2;
+- separate parent/provider context;
+- archive-state preservation during reinforcement;
+- transactional graph/event updates;
+- Gemini grounding with de-identified context;
+- `.childmind` portability;
+- persistence, malformed-input and second-installation tests.
 
-## Deliberately deferred
+## Deferred gates
 
-The following are not claimed as complete:
-
-- parent editing or rewriting of memory content;
-- permanent deletion and secure erasure workflow;
-- passphrase change and recovery;
+- memory editing/correction;
+- permanent deletion/secure-erasure semantics;
+- full learner deletion;
+- passphrase change/recovery;
+- contradiction/expiry governance beyond current confidence/evidence fields;
 - semantic embeddings;
-- graph visualisation with drag-and-zoom physics;
-- native Android/iOS storage;
-- multi-subject graph ontology;
-- independent child-safety and privacy/legal review;
+- multi-subject ontology;
+- native mobile storage;
+- independent security, child-safety and privacy/legal review;
 - real-child validation.
 
 ## Acceptance gates
 
-The first release candidate must pass:
+1. No child PII in plaintext technical manifests.
+2. Lesson creates correct evidence/Inbox items.
+3. Graph nodes/edges/provenance are explainable.
+4. Parent-visible context contains selected facts.
+5. Provider-safe context omits the child name and remains bounded.
+6. Archive removes an item from context.
+7. Reinforcement does not reactivate it.
+8. Restore returns it.
+9. Restart preserves Inbox/graph/archive state.
+10. Tampered/non-canonical exports are rejected.
+11. Clean second-install import restores canonical data without provider/device keys.
+12. Real Gemini, microphone and optional camera pass target-device tests.
 
-1. Create a synthetic learner and confirm no child PII is present in plaintext manifests.
-2. Complete a lesson and confirm memory items appear in the inbox.
-3. Confirm graph nodes and explained edges are created.
-4. Archive one memory and confirm it disappears from the next context packet.
-5. Restore it and confirm it returns.
-6. Close and reopen the application and confirm the graph persists.
-7. Export the `.childmind` file.
-8. Import it into a clean installation.
-9. Unlock it with the original passphrase.
-10. Confirm inbox, graph and context packet are restored without transferring the Gemini API key.
-11. Test with a real Gemini key using synthetic learner data.
-12. Complete target-device microphone and optional camera tests.
-
-Until those target-device gates pass, MindCarry remains pre-MVP.
+Until target-device gates pass, MindCarry remains pre-MVP.

@@ -1,218 +1,160 @@
 # Threat model
 
-This threat model covers the pre-MVP desktop architecture. It does not claim that MindCarry is ready for production child use.
+This threat model covers the current desktop pre-MVP. It does not claim that MindCarry is ready for production child use.
 
-## Assets
+## Protected assets
 
-- child profile and learning history;
+- child profile, lessons, memories and graph;
 - parent passphrase;
-- Gemini API key;
-- encrypted learner database;
+- Gemini test API key;
+- encrypted learner database and backups;
 - encrypted device learner catalogue;
 - `.childmind` exports;
 - camera and microphone permissions;
-- lesson integrity and mastery records;
-- application update and release integrity.
+- lesson/mastery integrity;
+- source, dependency and release integrity.
 
 ## Trust assumptions
 
 - the parent controls the signed-in operating-system account;
-- the operating system and device are not already fully compromised;
-- the repository dependencies installed by npm are authentic;
-- Gemini API transport and account controls operate as documented by the provider;
-- the parent does not share the learner passphrase with untrusted people.
+- the operating system is not already fully compromised;
+- the parent keeps the passphrase private;
+- installed dependencies and GitHub Actions are authentic;
+- provider transport/account controls work as documented.
 
-MindCarry does not defend against an attacker with complete administrator control, memory inspection capability or malware already running as the same user.
+MindCarry cannot protect secrets from an attacker with full administrator access, same-user malware or reliable process-memory inspection.
 
-## Threats and controls
+## Threats, controls and residual risk
 
-### Stolen laptop or disk
+### Stolen device or disk
 
-**Risk:** an attacker reads the learner database from disk.
+**Risk:** learner data is read from storage.
 
-**Controls:**
+**Controls:** AES-256-GCM learner database, scrypt parent key, encrypted catalogue, OS-protected API/device keys, no plaintext database file.
 
-- learner database encrypted with AES-256-GCM;
-- key derived from parent passphrase with scrypt;
-- learner name stored in encrypted device catalogue;
-- API key protected through operating-system credential storage;
-- no plaintext database file persisted by the application.
-
-**Residual risk:** weak parent passphrases remain vulnerable to offline guessing. The current prototype requires 12 characters but does not yet provide a strength meter or recovery plan.
+**Residual risk:** a weak 12-character passphrase may still be guessed offline. No strength meter or recovery system exists.
 
 ### Stolen `.childmind` export
 
-**Risk:** portable learner package is copied from email, USB storage or cloud drive.
+**Risk:** the portable file is copied from USB, email or cloud storage.
 
-**Controls:**
+**Controls:** database remains passphrase-encrypted; technical manifest excludes child identity and credentials; default filename uses a short UUID.
 
-- database remains passphrase encrypted;
-- package metadata excludes name, age and API key;
-- learner UUID is not treated as an authentication secret.
-
-**Residual risk:** filename or surrounding storage location may reveal information chosen by the parent. The default filename uses a short UUID rather than the child’s name.
+**Residual risk:** surrounding filenames/folders chosen by the parent can reveal context.
 
 ### Wrong passphrase or corrupted database
 
-**Risk:** invalid input returns partial data or causes unsafe state.
+**Risk:** partial decryption or inconsistent state is exposed.
 
-**Controls:**
+**Controls:** authenticated decryption, UUID-associated data, strict envelope/KDF/base64 validation, SQLite integrity check, exactly one matching profile and consent record.
 
-- authenticated decryption fails before database creation;
-- learner UUID is associated data;
-- SQLite integrity check after decryption;
-- database learner identity must match the folder UUID;
-- errors do not return decrypted content.
+**Residual risk:** corrupted local data may still require restoration from an encrypted backup/export.
 
-### Malicious `.childmind` file
+### Malicious `.childmind` package
 
-**Risk:** imported content triggers path traversal, oversized allocation or database confusion.
+**Risk:** path traversal, oversized allocation, unsupported schema or database confusion.
 
-**Controls:**
+**Controls:** bounded file and encrypted-payload size, JSON/package/version/schema validation, UUID validation, canonical base64, checksum, fixed destination, no archive extraction, no overwrite of an existing learner, post-passphrase database identity verification.
 
-- file-size limit;
-- strict package format/version check;
-- UUID validation;
-- fixed application-controlled destination path;
-- SHA-256 checksum validation;
-- no archive extraction;
-- existing learner directories cannot be overwritten;
-- decrypted database identity checked at unlock.
-
-**Residual risk:** encrypted content is not structurally inspectable until the parent supplies a valid passphrase. Fuzzing and deeper malformed-SQLite testing remain necessary.
+**Residual risk:** encrypted SQLite bytes cannot be structurally inspected before a valid passphrase is supplied. Fuzzing remains required.
 
 ### Renderer compromise or XSS
 
-**Risk:** malicious renderer code accesses files, keys or Electron APIs.
+**Risk:** malicious renderer content accesses keys/files or invokes privileged functions.
 
-**Controls:**
+**Controls:** sandbox, context isolation, Node disabled, production DevTools disabled, exact IPC sender check, no external renderer network, new windows/navigation denied, narrow named preload API, main-process argument validation.
 
-- Node integration disabled;
-- context isolation enabled;
-- renderer sandbox enabled;
-- restrictive CSP;
-- arbitrary navigation and new windows denied;
-- narrow preload methods;
-- main-process IPC sender validation;
-- all privileged arguments validated again in the main process;
-- no arbitrary filesystem function exposed.
-
-**Residual risk:** a main-process or Electron vulnerability could bypass these controls. Electron and dependencies must be kept current.
+**Residual risk:** Electron/main-process vulnerabilities or compromised packaged source can bypass renderer controls.
 
 ### API-key theft
 
-**Risk:** Gemini key appears in source, logs, renderer state or learner export.
+**Risk:** Gemini key appears in source, renderer state, logs or learner export.
 
-**Controls:**
+**Controls:** key entered only in Settings, tested and stored in main process, masked input, OS `safeStorage`, insecure Linux `basic_text` rejected, excluded from learner folders/exports/logging.
 
-- key entered only through Settings;
-- main process tests and stores it;
-- Electron `safeStorage` encryption;
-- masked password input;
-- excluded from learner folder and `.childmind` package;
-- `.env` and secret files ignored by Git;
-- no key logging.
+**Residual risk:** DPAPI/Keychain/secret-service protection does not defeat same-user malware. A public service should avoid distributing a vendor-owned production key.
 
-**Residual risk:** Windows DPAPI protects against other users, not necessarily malware running as the same signed-in user. A public product should use a server-mediated credential model rather than distributing vendor keys.
+### Unauthorised camera or microphone
 
-### Camera or microphone without consent
+**Risk:** media begins without the selected learner’s consent.
 
-**Risk:** media starts when the parent disabled it.
+**Controls:** default deny, active-lesson policy, encrypted consent, camera off by default, typed fallback, media policy cleared on completion/cancel/lock/close, stream stopped on startup failure/unmount, raw storage forced off.
 
-**Controls:**
+**Residual risk:** browser and OS permission behaviour requires target-device testing.
 
-- camera off by default;
-- learner consent stored in encrypted database;
-- media permission denied by default;
-- active media policy set from unlocked learner consent;
-- camera movement value accepted only when both camera and local-analysis consent are enabled;
-- media policy cleared on lesson completion, cancellation, lock and window close;
-- raw media storage forced off.
+### Behaviour overinterpretation
 
-**Residual risk:** target-device testing is required because Chromium and operating-system permission behaviours vary.
+**Risk:** movement or delay is treated as emotion, identity or diagnosis.
 
-### Misclassification of child behaviour
+**Controls:** numeric movement only, local frames, explicit non-diagnostic wording, no face/emotion model, prompt prohibits diagnosis, repeated evidence required for stable memory.
 
-**Risk:** movement or hesitation is presented as an emotion, diagnosis or judgement.
+**Residual risk:** users can still overinterpret a displayed number. Public UX requires further safeguarding review.
 
-**Controls:**
+### Incorrect or unsafe model output
 
-- current camera output is a numeric movement value only;
-- UI and stored cue explicitly state it is not a diagnosis;
-- no face recognition or emotion model;
-- no medical or developmental labels;
-- model prompt prohibits diagnosis.
+**Risk:** Gemini generates unsuitable, wrong or unrelated wording.
 
-**Residual risk:** parents may still overinterpret a number. The public product should prefer descriptive observations and require multiple-session evidence.
+**Controls:** model never determines correctness/mastery or writes memory; bounded de-identified context; short output; zero thinking budget; timeout/retry; deterministic fallback; diagnosis/personal-information prohibitions.
 
-### Unsafe or incorrect Gemini output
+**Residual risk:** moderation, curriculum validation and model red-teaming are incomplete.
 
-**Risk:** generated wording is inappropriate, wrong or unrelated.
+### Child identity leakage to provider
 
-**Controls:**
+**Risk:** the learner’s name or full history is sent externally.
 
-- Gemini does not determine correctness or write memory directly;
-- deterministic assessment and lesson state remain authoritative;
-- minimal prompt scope;
-- child-safe system instruction;
-- short output limit;
-- timeout and bounded retry;
-- deterministic fallback on provider failure.
+**Controls:** provider system instruction omits name; provider-safe graph replaces learner-node label with `Learner`; context is ranked/capped; complete database, complete graph, raw media, passphrase and export never sent.
 
-**Residual risk:** output moderation, red-team testing and curriculum validation are not complete. The current prototype should be used only in supervised tests.
+**Residual risk:** selected interests and learning observations are still personal data once intentionally sent to the configured provider.
+
+### Lesson race or state corruption
+
+**Risk:** duplicate start/answer actions produce incorrect evidence.
+
+**Controls:** one active lesson per learner, old lesson cancellation, answer-processing lock, active-session ownership checks, SQL transactions and expected-row checks.
+
+**Residual risk:** abrupt process termination can still interrupt the in-memory session; stronger crash recovery is pending.
+
+### Parent archive bypass
+
+**Risk:** a memory archived by a parent becomes active automatically after repeated evidence.
+
+**Controls:** reinforcement preserves `active = 0`; only explicit restore reactivates; lifecycle event is recorded; graph excludes archived memory.
+
+**Residual risk:** parent correction and permanent deletion are not yet implemented.
 
 ### Data loss during save
 
-**Risk:** crash or power interruption damages the learner database.
+**Risk:** crash, power loss or disk failure damages data.
 
-**Controls:**
+**Controls:** encrypted export to new bytes, rotating prior backups, destination-local temporary write, flush and atomic rename, verification on unlock.
 
-- export database to new encrypted bytes;
-- copy previous encrypted database into rotating backup;
-- write temporary file in destination directory;
-- flush and atomically rename;
-- validate database on next unlock.
-
-**Residual risk:** disk failure can affect both primary and local backups. Parents need verified external `.childmind` backups.
+**Residual risk:** one disk failure can affect primary and local backups. Families need verified external exports and restore UI.
 
 ### Forgotten passphrase
 
-**Risk:** family permanently loses access.
+**Risk:** permanent loss of access.
 
-**Current behaviour:** MindCarry has no recovery key or vendor backdoor.
+**Current behaviour:** no recovery key or vendor backdoor.
 
-**Required future decision:** design an opt-in recovery mechanism that preserves family control, or communicate unrecoverability clearly and support verified backup practices.
+**Required decision:** an opt-in family-controlled recovery design or clear unrecoverability/backup workflow.
 
 ### Supply-chain compromise
 
-**Risk:** malicious npm package, GitHub Action or build artefact.
+**Risk:** malicious npm dependency, action or build artefact.
 
-**Current controls:**
+**Controls:** exact direct versions, committed lockfile, `npm ci`, limited workflow permissions, official pinned-major GitHub actions, production high-severity audit, CodeQL, Windows/Linux verification.
 
-- exact dependency versions;
-- limited GitHub Actions permissions;
-- official checkout/setup actions;
-- CI verification.
-
-**Required before release:**
-
-- committed lockfile;
-- dependency-review automation;
-- vulnerability scanning;
-- signed tags and release artefacts;
-- code signing/notarisation;
-- protected release credentials;
-- reproducible-build investigation.
+**Residual risk:** action references are not pinned to immutable commit SHAs, releases are unsigned, and reproducible builds are not established.
 
 ## Production gates
 
-- independent penetration test;
-- threat review of passphrase and recovery design;
-- Electron fuse configuration;
-- signed application and update channel;
-- parent data deletion and correction controls;
+- independent penetration/application-security assessment;
+- passphrase and recovery review;
+- Electron fuse hardening;
+- signed/notarised application and secure updates;
+- parent correction/deletion/full-learner controls;
+- verified backup/restore UX;
 - child-safety and safeguarding review;
-- model red-team testing;
+- model red-team and curriculum validation;
 - jurisdiction-specific privacy/legal review;
-- incident-response process;
-- verified backup and restore UX.
+- incident response and retention policy.

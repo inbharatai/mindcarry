@@ -1,8 +1,8 @@
 # Automatic local vault
 
-MindCarry parents do not create, connect or manage a learner folder manually.
+MindCarry parents do not create, connect or manage technical learner folders manually.
 
-The Electron main process creates the complete folder structure under the operating system’s application-data location on first launch. The path is returned by `app.getPath('userData')` and displayed in **Settings → Automatic local vault**.
+The Electron main process creates the complete runtime structure under `app.getPath('userData')`. The exact location and secure credential backend are displayed in **Settings → Automatic local vault**.
 
 ## Runtime layout
 
@@ -27,106 +27,126 @@ The Electron main process creates the complete folder structure under the operat
     └── temp/
 ```
 
-## Why the folder name is not the child’s name
+## Plaintext technical boundary
 
-Each learner directory uses a random UUID. A child’s name, age, interests and parent goal remain inside the encrypted database. The plaintext `manifest.json` contains only technical values needed before decryption:
+A learner directory uses a random UUID, not the child’s name. `manifest.json` contains only:
 
-- file format;
 - format and schema versions;
 - learner UUID;
-- creation and update timestamps;
+- creation/update timestamps;
 - encryption identifier;
-- encrypted-database SHA-256 hash.
+- encrypted-database SHA-256 hash;
+- a flag stating that the technical manifest itself has no personal fields.
 
-The local home-screen learner list is stored separately in `learner-catalog.enc`, encrypted with a random device key protected through Electron `safeStorage`.
+The child’s name, age, language, interests, parent goal, consent, sessions, attempts, memories, graph and audit events are inside `learner.db.enc`.
 
-## Folder creation sequence
+The home-screen list lives in `learner-catalog.enc`, protected by a random device key wrapped through Electron `safeStorage`. MindCarry rejects Linux `basic_text`/unknown fallback instead of storing names or an API key through an insecure backend.
 
-When the app starts:
+## Learner creation
 
-1. `VaultManager` resolves the absolute vault path.
-2. It creates the root, learners, exports, backups, recovery and temporary directories.
-3. It creates a non-personal technical vault descriptor when missing.
-4. It removes stale temporary files on a best-effort basis.
-5. `CatalogStore` opens the encrypted learner catalogue.
-6. Legacy plaintext manifests are migrated into the encrypted catalogue when possible.
+1. Main process validates name, age, language, interests, goal, consent and passphrase.
+2. A random UUID and complete learner folder are created.
+3. SQLite schema, profile, consent and initial skill are written in an explicit transaction.
+4. The database bytes are exported in main-process memory.
+5. Bytes are encrypted with the parent passphrase.
+6. `learner.db.enc` is written atomically.
+7. A non-personal manifest and encrypted catalogue entry are written.
+8. The deterministic graph is created inside the encrypted database.
+9. Any incomplete learner folder is removed after failure.
 
-When a parent creates a learner:
-
-1. MindCarry generates a random learner UUID.
-2. It creates the complete learner subdirectory structure.
-3. It creates the SQLite schema in memory.
-4. It writes the profile, consent and initial skill records.
-5. It exports the SQLite bytes in memory.
-6. It encrypts those bytes with the parent passphrase.
-7. It atomically writes `learner.db.enc`.
-8. It writes a non-personal manifest.
-9. It adds the learner to the encrypted device catalogue.
-10. It removes the incomplete learner directory if any step fails.
-
-## Encryption layers
-
-### Portable learner database
+## Learner database encryption
 
 - AES-256-GCM authenticated encryption;
-- scrypt-derived 256-bit key;
-- random 16-byte salt;
-- random 12-byte IV;
-- learner UUID used as authenticated associated data;
-- envelope versioning for migrations;
-- parent passphrase never written to disk.
+- 256-bit key derived asynchronously with scrypt;
+- random 16-byte salt and 12-byte IV;
+- learner UUID as authenticated associated data;
+- fixed supported KDF parameters;
+- strict canonical-base64 and envelope-version parsing;
+- bounded encrypted payload size;
+- passphrase never written to disk by MindCarry.
 
-This layer is portable because another installation can derive the same key from the parent passphrase and the salt stored in the encrypted envelope.
+After decryption, MindCarry requires:
 
-### Device learner catalogue
+- successful SQLite integrity check;
+- exactly one profile;
+- profile UUID matching the folder UUID;
+- a matching consent record;
+- supported schema migration.
 
-- random 256-bit device key;
-- device key protected with Electron `safeStorage`;
+The decrypted SQL.js database and passphrase remain in Electron main-process memory while unlocked. JavaScript cannot guarantee deterministic heap wiping; this is a documented residual risk.
+
+## Catalogue and API-key protection
+
+- random 256-bit catalogue key;
 - AES-256-GCM catalogue encryption;
-- device-specific and not included in `.childmind` exports.
+- key wrapped by an accepted OS credential backend;
+- strict UUID, age, timestamp and duplicate-entry validation;
+- Gemini key tested before storage;
+- catalogue/device key and Gemini key never included in `.childmind`.
 
-Imported learners first appear as **Imported learner** until the original parent passphrase successfully decrypts the database. The verified child name is then written into the receiving device’s encrypted catalogue.
+On Windows, the expected backend is `dpapi`. Target-device testing must confirm it.
 
-## Atomic persistence
+## Atomic persistence and backups
 
-MindCarry writes new encrypted content to a temporary file in the destination directory, flushes it and renames it over the previous file. The old encrypted database is copied into the learner’s backup directory before replacement.
+For each material update MindCarry:
 
-The current prototype retains the five newest encrypted database backups per learner.
+1. exports the in-memory SQLite bytes;
+2. encrypts new bytes;
+3. copies the previous encrypted database into the learner backup folder;
+4. writes a destination-local temporary file;
+5. flushes and atomically renames it;
+6. updates the technical checksum manifest.
 
-Atomic replacement reduces, but cannot eliminate, data-loss risk caused by power failure, disk failure or operating-system interruption.
+The current implementation retains the five newest encrypted database backups per learner. This reduces corruption risk but does not replace a verified external backup.
 
-## Export format
+## Memory Inbox and graph storage
 
-A `.childmind` file is a JSON package containing:
+The following remain inside the same encrypted database:
 
-- package format and version;
-- non-personal technical manifest;
-- base64-encoded encrypted learner database;
-- SHA-256 integrity checksum.
+- active and archived memory items;
+- evidence counts and confidence;
+- lifecycle events;
+- graph nodes and edges;
+- relation provenance;
+- ranked context source data.
 
-It does not contain:
+No separate graph server, graph folder or provider-specific embedding index is needed.
 
-- Gemini API key;
-- device catalogue key;
-- plaintext child name;
-- plaintext learner database;
-- operating-system credentials.
+## `.childmind` format
 
-The import process validates file size, package version, learner UUID and checksum before creating the new learner structure.
+A `.childmind` file is JSON containing:
 
-## Reserved directories
+- package format/version and export time;
+- non-personal technical learner manifest;
+- base64 of the already-encrypted learner database;
+- SHA-256 checksum.
 
-The `media`, `handwriting` and `pronunciation` directories exist so future modules have predictable storage boundaries. Their existence does not mean the current prototype stores those data types.
+Import validates:
 
-Raw audio and video storage remain disabled in the current implementation.
+- regular-file and total-size bounds;
+- package and learner-manifest format/version;
+- supported schema version;
+- UUID;
+- canonical base64 and encrypted-payload bound;
+- checksum;
+- absence of an existing learner directory.
 
-## Parent experience
+After the parent enters the original passphrase, database identity/integrity is verified and the graph is rebuilt. Until then the receiving UI displays **Imported learner**.
 
-The parent only needs to:
+## Reserved folders
 
-1. create the learner inside the app;
-2. choose a strong passphrase;
-3. keep that passphrase safe;
-4. use Export when they want a portable backup or transfer.
+`media`, `handwriting` and `pronunciation` reserve future boundaries. Their existence does not mean data is currently stored there.
 
-No folder selection is required for normal operation.
+Raw audio and raw video storage are forced off in the current implementation.
+
+## Parent responsibility
+
+The parent needs to:
+
+1. choose and retain a strong passphrase;
+2. keep the signed-in OS account/device protected;
+3. export a `.childmind` backup when needed;
+4. protect exported files;
+5. understand that no passphrase recovery currently exists.
+
+Normal operation requires no folder selection.

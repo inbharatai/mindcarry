@@ -1,221 +1,185 @@
 # Security and readiness audit
 
-This document records the repository-level review performed before the first target-device test. It is not an independent certification or legal opinion.
+This document records the repository-level A-to-Z review completed before the founder-device acceptance test. It is not an independent certification, penetration test, safeguarding approval or legal opinion.
 
-## Audit scope
+## Scope reviewed
 
-Reviewed areas:
+- Electron window, navigation, renderer and IPC boundaries;
+- preload capability surface;
+- secure-storage backend handling;
+- settings and API-key lifecycle;
+- vault, catalogue and per-learner folder lifecycle;
+- encryption envelopes, key derivation and atomic persistence;
+- database schema, integrity and session ownership;
+- lesson state, concurrency, answer parsing and mastery;
+- Memory Inbox, graph, ranking and provider context;
+- camera, microphone and speech cleanup;
+- `.childmind` export/import validation;
+- Windows installation and dependency reproducibility;
+- CI, CodeQL, tests and documentation accuracy.
 
-- Electron window and renderer isolation;
-- preload bridge and IPC validation;
-- local folder lifecycle;
-- learner-database encryption;
-- device catalogue protection;
-- Gemini API-key handling;
-- lesson-state persistence;
-- `.childmind` export/import;
-- camera and microphone permissions;
-- automated setup;
-- test and CI coverage;
-- documentation accuracy.
+## High-priority findings corrected
 
-## High-priority issues corrected
+### Over-broad renderer trust
 
-### Plaintext learner identity in manifests
+**Previous risk:** any `file://` sender could satisfy the IPC trust check.
 
-**Previous risk:** the learner manifest included preferred name, age and language outside the encrypted database.
+**Correction:** development IPC requires the exact configured origin, and packaged IPC requires the exact built `index.html` file. Production DevTools are disabled, arbitrary navigation/new windows remain denied, and renderer CSP no longer permits direct Gemini network access.
 
-**Correction:** learner folders now use UUIDs, plaintext manifests contain only technical metadata, and the home-screen learner list is stored in an encrypted device catalogue.
+### Insecure Linux credential fallback
 
-### Parent-managed folder expectation
+**Previous risk:** `safeStorage.isEncryptionAvailable()` alone can be true while Electron uses Linux `basic_text`.
 
-**Previous risk:** documentation could imply that a parent had to create or move a folder manually for normal use.
+**Correction:** MindCarry reads the selected backend and rejects `basic_text`, `unknown` and unavailable storage. Learner creation and API-key storage fail closed when the backend is not adequately protected.
 
-**Correction:** `VaultManager` automatically creates the app vault and every per-learner directory. Parents interact only through the application and encrypted export flow.
+### Duplicate lessons and answer races
 
-### Incomplete media permission enforcement
+**Previous risk:** repeated renderer effects or double submission could create overlapping active lessons or record the same answer twice.
 
-**Previous risk:** a broad media permission handler could approve camera or microphone access without checking the selected learner’s consent.
+**Correction:** React development double-effects were removed, renderer startup has cancellation cleanup, a new lesson cancels the prior active lesson, learner lock cancels open lessons, and each lesson has a main-process answer lock.
 
-**Correction:** the main process now denies permissions by default and enables audio/video only for an active lesson whose learner consent permits it.
+### Child identity in provider requests
 
-### Invalid or unstable model default
+**Previous risk:** Gemini prompts included the learner’s preferred name through system instructions or graph context.
 
-**Previous risk:** model configuration was hard-coded to a model string without a verified compatibility boundary.
+**Correction:** the provider instruction uses only age, not name. A separate provider-safe context replaces learner-node labels with `Learner`; the complete database and graph are never sent.
 
-**Correction:** the provider defaults to stable `gemini-2.5-flash`, centralises the model name, applies a request timeout, retries only transient failures and falls back to deterministic demo teaching.
+### Unranked context
 
-### API key stored before validation
+**Previous risk:** recent memories were selected without true objective relevance, and graph facts were not included in the provider text.
 
-**Previous risk:** an invalid API key could be stored and leave the application in a broken provider state.
+**Correction:** active memories and graph facts are ranked using objective/skill overlap, type, evidence, confidence, recency and review state, then capped to eight memories, twelve facts and 1,800 characters.
 
-**Correction:** MindCarry tests the key first, enables Gemini only after success and stores it through Electron `safeStorage` outside the learner vault.
+### Archived memory reactivation
 
-### Weak lesson completion condition
+**Previous risk:** repeated evidence for an archived item could accidentally make it eligible again.
 
-**Previous risk:** the prototype could complete after a small number of correct answers without a clear transfer requirement.
+**Correction:** reinforcement updates confidence/evidence while preserving the archived state. Only an explicit parent restore makes it active.
 
-**Correction:** the lesson now requires three stages and an independent transfer answer. Mastery is capped below 80 when independent evidence is insufficient.
+### Weak package and envelope parsing
 
-### Unversioned data evolution
+**Previous risk:** permissive base64/JSON parsing and incomplete schema checks increased malformed-input risk.
 
-**Previous risk:** schema changes could break previously created learner databases.
+**Correction:** encryption and `.childmind` parsing now require canonical base64, supported versions/KDF settings, bounded payloads, valid UUIDs, supported schema, checksum match and a fixed application-controlled destination.
 
-**Correction:** the database includes schema metadata and additive migration logic. Decrypted databases also undergo SQLite integrity and learner-identity checks.
+### Incomplete transaction boundaries
 
-### Export/import boundary
+**Previous risk:** session completion, memory updates or graph events could partially apply in memory.
 
-**Previous risk:** package validation and metadata minimisation were incomplete.
+**Correction:** SQL mutations use explicit transactions; session ownership and active status are checked; expected row changes are enforced; graph/event changes are transactional before encrypted persistence.
 
-**Correction:** import now validates size, format version, UUID and checksum. Export metadata excludes child name, age and API credentials.
+### Camera stream cleanup
 
-### Non-atomic database replacement
+**Previous risk:** a stream acquired before `video.play()` failure could remain active.
 
-**Previous risk:** a process or power interruption during save could damage the only encrypted database file.
+**Correction:** acquired tracks are stopped after startup errors, cancellation and unmount, and the preview source is cleared.
 
-**Correction:** encrypted saves use a destination-local temporary file, flush and atomic rename, with rotating encrypted backups.
+### Non-deterministic dependencies
+
+**Previous risk:** exact direct versions existed without a committed dependency graph.
+
+**Correction:** `package-lock.json` is committed, local/CI setup uses `npm ci`, CI performs a production high-severity audit, and CodeQL runs security-and-quality queries.
 
 ## Controls currently implemented
 
-### Electron
+### Electron and renderer
 
-- Node.js integration disabled in the renderer;
-- context isolation enabled;
-- renderer sandbox enabled;
-- web security enabled;
-- navigation restricted;
-- new windows denied;
-- restrictive Content Security Policy;
-- explicit permission handlers;
-- narrow `contextBridge` API;
-- IPC sender URL checked in the main process;
-- no general-purpose filesystem or shell API exposed to the renderer.
+- renderer sandbox and context isolation;
+- Node integration disabled;
+- production DevTools disabled;
+- exact IPC sender validation;
+- restrictive CSP with renderer external network blocked;
+- no arbitrary IPC, filesystem or shell bridge;
+- input validation repeated in the main process;
+- default-deny media policy.
 
-### Cryptography and storage
+### Cryptography and local storage
 
-- AES-256-GCM authenticated encryption;
-- asynchronous scrypt key derivation;
-- random salt and IV;
-- associated data binds an encrypted database to its learner UUID;
-- timing-safe checksum comparison;
-- encrypted learner catalogue;
-- OS-protected device key;
-- no plaintext learner PII in technical manifests;
-- API key excluded from learner exports;
-- import size and checksum validation;
-- atomic writes and backup rotation.
+- AES-256-GCM;
+- asynchronous scrypt with fixed supported parameters;
+- random salt/IV and authenticated learner UUID;
+- strict, versioned and bounded envelopes;
+- encrypted device catalogue;
+- OS-protected device/API keys with insecure Linux fallback rejected;
+- no child PII in plaintext learner manifests;
+- atomic replacement and rotating encrypted backups;
+- SQLite integrity, identity and consent checks;
+- sensitive buffers cleared where JavaScript permits.
 
-### AI provider
+### Tutoring and memory integrity
 
-- provider can be disabled completely through demo mode;
-- API key is tested before storage;
-- short request timeout;
-- bounded transient retry;
-- deterministic fallback when Gemini fails;
-- minimal lesson context;
-- child-safe system instruction;
-- model does not write directly to the learner database.
+- deterministic correctness and lesson state;
+- three distinct question answers;
+- independent transfer required;
+- response/reasoning bounds;
+- active-session ownership checks;
+- duplicate-answer lock;
+- parent archive state preserved;
+- memory lifecycle audit events;
+- deterministic/rebuildable graph;
+- model cannot write directly to canonical memory.
+
+### Provider boundary
+
+- Gemini key tested before activation;
+- API key outside learner vault/export;
+- 20-second timeout and bounded transient retry;
+- deterministic fallback;
+- zero model-thinking budget for short tutoring wording;
+- de-identified bounded context;
+- prompt prohibits diagnosis and internal-system disclosure.
 
 ### Child-data boundary
 
 - camera off by default;
-- raw audio/video storage forced off in the alpha;
-- no face recognition;
-- no identity or demographic inference;
-- no emotion or condition diagnosis;
-- movement stored only when camera and local-analysis consent are both enabled;
-- behavioural cue text explicitly states that it is not a diagnosis.
+- raw audio/video storage forced off;
+- camera frames processed locally;
+- no face recognition, identity inference or emotion diagnosis;
+- movement cue stored only with both consent flags;
+- microphone has typed fallback and learner-language mapping.
 
 ## Automated verification
 
-The CI pipeline runs on Windows and Linux and separates:
+The final pipeline is configured to run on Windows and Ubuntu using the committed lockfile:
 
-1. dependency installation;
-2. security-sensitive linting;
-3. dependency-free smoke test;
-4. unit and integration tests;
-5. TypeScript checking and renderer build.
+1. `npm ci`;
+2. production dependency audit on Linux;
+3. privileged-code lint;
+4. dependency-free security smoke;
+5. unit/integration tests;
+6. TypeScript and production renderer build;
+7. Windows Electron package-layout build.
 
-Coverage includes:
+CodeQL runs separately.
 
-- encryption round trip;
-- wrong key and associated-data rejection;
-- ciphertext tampering;
-- encrypted device catalogue;
-- automatic vault creation;
-- per-learner folder creation;
-- atomic external writes;
-- answer parsing and misconception detection;
-- transfer-based mastery;
-- encrypted persistence after close/reopen;
-- PII absence from plaintext manifest;
-- export/import between two simulated installations.
+Tests cover malformed encryption, secure-storage fallback, renderer trust, catalogue validation, lesson parsing/concurrency support, Memory Inbox lifecycle, graph ranking/context minimisation, persistence and two-installation transfer.
 
-## Known risks and remaining work
+## Residual risks
 
-### Target-device execution
+- no target Windows launch evidence yet;
+- no independent penetration test;
+- no passphrase recovery/change;
+- decrypted DB and passphrase remain in the main-process heap while unlocked;
+- SQL.js uses encrypted exported bytes rather than SQLCipher;
+- no parent correction/permanent deletion/full learner deletion;
+- no verified restore UI or complete crash recovery;
+- no Electron fuse hardening yet;
+- unsigned, non-notarised builds and no secure updater;
+- no completed curriculum, accessibility, safeguarding or legal review;
+- no real-child validation.
 
-The app must still be installed and launched on the target Windows computer. CI does not prove webcam, microphone, OS credential-store prompts, display rendering or Gemini connectivity on that device.
+## Founder-device release gate
 
-### Passphrase recovery
+Do not describe MindCarry as a functioning prototype until the target Windows test demonstrates:
 
-There is no passphrase recovery. A forgotten passphrase makes the portable learner database inaccessible. A future recovery design must not introduce a hidden vendor master key.
-
-### In-memory secrets
-
-The parent passphrase remains in the Electron main-process JavaScript heap while a learner is unlocked. JavaScript does not guarantee deterministic memory wiping. The application limits renderer access, but a production security review must consider stronger key/session handling.
-
-### SQL.js architecture
-
-The prototype encrypts exported SQLite bytes rather than using SQLCipher. This protects data at rest, but the decrypted database exists in process memory while unlocked. Production architecture should be reviewed against the target threat model and device constraints.
-
-### OS credential semantics
-
-Electron `safeStorage` security differs by operating system. Windows uses the signed-in user’s DPAPI context. Linux systems without a secure secret store may fall back to a weaker backend; production Linux support must explicitly reject insecure fallback storage.
-
-### Dependency assurance
-
-The repository pins exact dependency versions, but a committed lockfile and continuous vulnerability monitoring are still required before releases.
-
-### Signed distribution and updates
-
-Installers are not code-signed, notarised or connected to a secure update channel. Production releases require signed artefacts, protected release keys and update verification.
-
-### Parent data controls
-
-Memory inspection exists in the dashboard, but correction, selective deletion, retention rules, passphrase change, full learner deletion and export verification UI remain incomplete.
-
-### Safeguarding and legal review
-
-Child-safety, safeguarding, privacy, age-assurance, consent and launch-jurisdiction legal review remain mandatory before use beyond controlled founder-led testing.
-
-## Merge gate for this audit
-
-This branch should merge only when:
-
-- Windows CI passes;
-- Linux CI passes;
-- lint passes;
-- smoke test passes;
-- unit and integration tests pass;
-- TypeScript and production renderer build pass;
-- documentation describes MindCarry as pre-MVP;
-- no Gemini key or learner export is committed.
-
-## First-device test gate
-
-The codebase should be described as a functioning prototype only after all of the following are demonstrated on the founder’s Windows machine:
-
-- automatic Desktop source-folder setup;
-- automatic runtime vault creation;
-- learner creation and unlock;
-- encrypted database present and unreadable as plaintext;
-- demo lesson completion;
-- app close/reopen persistence;
-- successful Gemini key validation;
-- safe fallback after network/API failure;
-- microphone consent and denial paths;
-- camera consent and denial paths;
-- `.childmind` export;
-- import and unlock on a second installation;
-- no API key in the exported package.
+- clean main-only installation;
+- app launch and every screen rendered correctly;
+- DPAPI-backed secure storage;
+- automatic vault and encrypted learner creation;
+- deterministic lesson and Memory Inbox/graph updates;
+- archive/restore context behaviour;
+- restart persistence;
+- real Gemini success and safe failure paths;
+- microphone/camera allow, deny and cleanup paths;
+- `.childmind` transfer across two clean installations;
+- no API key transfer or plaintext learner leakage.
