@@ -15,15 +15,27 @@ class MemoryStore {
     this.vault = vault;
     this.catalog = catalog;
     this.sessions = new Map();
+    this.initialised = false;
+    this.initialising = null;
   }
 
   async initialise() {
-    this.vault.ensure();
-    if (!this.SQL) {
-      const wasmPath = require.resolve('sql.js/dist/sql-wasm.wasm');
-      this.SQL = await initSqlJs({ locateFile: () => wasmPath });
+    if (this.initialised) return;
+    if (this.initialising) return this.initialising;
+    this.initialising = (async () => {
+      this.vault.ensure();
+      if (!this.SQL) {
+        const wasmPath = require.resolve('sql.js/dist/sql-wasm.wasm');
+        this.SQL = await initSqlJs({ locateFile: () => wasmPath });
+      }
+      await this.migrateLegacyManifests();
+      this.initialised = true;
+    })();
+    try {
+      await this.initialising;
+    } finally {
+      this.initialising = null;
     }
-    await this.migrateLegacyManifests();
   }
 
   paths(learnerId) {
@@ -63,7 +75,6 @@ class MemoryStore {
       }
       if (manifest.preferredName || manifest.age || manifest.language) {
         this.writeManifest(learnerId, {
-          learnerId,
           createdAt: manifest.createdAt,
           updatedAt: manifest.updatedAt,
           dbSha256: manifest.dbSha256 || sha256(fs.readFileSync(paths.database)),
@@ -140,7 +151,7 @@ class MemoryStore {
       );
       this.writeManifest(learnerId, { createdAt, updatedAt: createdAt });
       await this.saveDatabase(learnerId, db, passphrase, { createBackup: false });
-      return this.catalog.upsert({
+      const catalogueEntry = this.catalog.upsert({
         learnerId,
         preferredName: preferredName.trim(),
         age: Number(age),
@@ -149,6 +160,8 @@ class MemoryStore {
         updatedAt: createdAt,
         metadataState: 'verified',
       });
+      db.close();
+      return catalogueEntry;
     } catch (error) {
       try {
         db.close();
@@ -180,6 +193,7 @@ class MemoryStore {
     for (const [table, column, type] of additions) {
       if (!this.tableColumns(db, table).has(column)) db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     }
+    db.run('CREATE INDEX IF NOT EXISTS idx_memories_active ON memories(active, last_confirmed)');
     db.run(`INSERT OR REPLACE INTO metadata (key, value) VALUES ('schema_version', ?)`, [String(SCHEMA_VERSION)]);
   }
 
@@ -218,6 +232,7 @@ class MemoryStore {
       await this.persist(learnerId);
       return dashboard;
     } catch (error) {
+      this.sessions.delete(learnerId);
       db.close();
       throw error;
     }
