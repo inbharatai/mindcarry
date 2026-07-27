@@ -303,7 +303,7 @@ Before any public child-facing release, the product requires broader curriculum 
 - [`docs/privacy-model.md`](docs/privacy-model.md) — local and provider data boundaries
 - [`docs/threat-model.md`](docs/threat-model.md) — security risks and mitigations
 - [`docs/demo-script.md`](docs/demo-script.md) — executable alpha demo
-- [`ROADMAP.md`](ROADMAP.md) — development stages
+- [`docs/roadmap.md`](docs/roadmap.md) — development stages
 - [`PROJECT_STATUS.md`](PROJECT_STATUS.md) — implementation and verification status
 
 ## Deployment note
