@@ -12,6 +12,7 @@ const {
   shouldComplete,
 } = require('./services/lessonEngine.cjs');
 const { MemoryStore } = require('./services/learnerMemoryStore.cjs');
+const { assertUuid, secureStorageStatus, trustedRendererUrl } = require('./services/runtimeSecurity.cjs');
 const { VaultManager } = require('./services/vaultManager.cjs');
 
 let mainWindow;
@@ -22,12 +23,25 @@ const activeLessons = new Map();
 let activeMediaPolicy = { audio: false, video: false };
 
 const DEFAULT_SETTINGS = Object.freeze({ provider: 'demo', geminiModel: DEFAULT_GEMINI_MODEL });
+const PRODUCTION_INDEX = path.join(__dirname, '..', 'dist', 'index.html');
+
+function normaliseSettings(value) {
+  const parsed = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    provider: parsed.provider === 'gemini' ? 'gemini' : 'demo',
+    geminiModel:
+      typeof parsed.geminiModel === 'string' && /^[a-z0-9][a-z0-9._-]{2,79}$/i.test(parsed.geminiModel)
+        ? parsed.geminiModel
+        : DEFAULT_GEMINI_MODEL,
+    ...(typeof parsed.deviceKeyEncrypted === 'string' ? { deviceKeyEncrypted: parsed.deviceKeyEncrypted } : {}),
+    ...(typeof parsed.geminiKeyEncrypted === 'string' ? { geminiKeyEncrypted: parsed.geminiKeyEncrypted } : {}),
+  };
+}
 
 function readSettings() {
   try {
     if (!fs.existsSync(vault.settingsPath)) return { ...DEFAULT_SETTINGS };
-    const parsed = JSON.parse(fs.readFileSync(vault.settingsPath, 'utf8'));
-    return { ...DEFAULT_SETTINGS, ...parsed, geminiModel: parsed.geminiModel || DEFAULT_GEMINI_MODEL };
+    return normaliseSettings(JSON.parse(fs.readFileSync(vault.settingsPath, 'utf8')));
   } catch {
     try {
       if (fs.existsSync(vault.settingsPath)) {
@@ -41,11 +55,15 @@ function readSettings() {
 }
 
 function writeSettings(settings) {
-  vault.atomicWriteJson(vault.settingsPath, { ...DEFAULT_SETTINGS, ...settings });
+  vault.atomicWriteJson(vault.settingsPath, normaliseSettings(settings));
+}
+
+function currentSecureStorageStatus() {
+  return secureStorageStatus(safeStorage, process.platform);
 }
 
 function ensureDeviceKey() {
-  if (!safeStorage.isEncryptionAvailable()) return null;
+  if (!currentSecureStorageStatus().available) return null;
   const settings = readSettings();
   if (settings.deviceKeyEncrypted) {
     try {
@@ -64,7 +82,7 @@ function ensureDeviceKey() {
 
 function getGeminiKey() {
   const settings = readSettings();
-  if (!settings.geminiKeyEncrypted || !safeStorage.isEncryptionAvailable()) return null;
+  if (!settings.geminiKeyEncrypted || !currentSecureStorageStatus().available) return null;
   try {
     return safeStorage.decryptString(Buffer.from(settings.geminiKeyEncrypted, 'base64'));
   } catch {
@@ -73,7 +91,7 @@ function getGeminiKey() {
 }
 
 async function saveAndTestGeminiKey(apiKey) {
-  if (!safeStorage.isEncryptionAvailable()) {
+  if (!currentSecureStorageStatus().available) {
     throw new Error('Secure operating-system credential storage is unavailable. MindCarry will not store an API key insecurely.');
   }
   const settings = readSettings();
@@ -108,17 +126,22 @@ function assertLearnerId(value) {
   return vault.validateLearnerId(assertString(value, 'Learner ID', 36, 36));
 }
 
-function trustedRendererUrl(url) {
-  const devUrl = process.env.VITE_DEV_SERVER_URL;
-  if (devUrl && url.startsWith(devUrl)) return true;
-  return url.startsWith('file://');
+function assertSessionId(value) {
+  return assertUuid(assertString(value, 'Session ID', 36, 36), 'Session ID');
+}
+
+function isTrustedRendererUrl(url) {
+  return trustedRendererUrl(url, {
+    devUrl: process.env.VITE_DEV_SERVER_URL,
+    productionFile: PRODUCTION_INDEX,
+  });
 }
 
 function registerHandler(channel, handler) {
   ipcMain.removeHandler(channel);
   ipcMain.handle(channel, async (event, payload) => {
     const senderUrl = event.senderFrame?.url || event.sender?.getURL?.() || '';
-    if (!trustedRendererUrl(senderUrl)) throw new Error('Blocked an untrusted application request.');
+    if (!isTrustedRendererUrl(senderUrl)) throw new Error('Blocked an untrusted application request.');
     return handler(payload, event);
   });
 }
@@ -128,7 +151,7 @@ function mediaPermissionAllowed(permission, details = {}) {
   if (permission === 'videoCapture') return activeMediaPolicy.video;
   if (permission !== 'media') return false;
   const mediaTypes = Array.isArray(details.mediaTypes) ? details.mediaTypes : [];
-  if (mediaTypes.length === 0) return activeMediaPolicy.audio || activeMediaPolicy.video;
+  if (mediaTypes.length === 0) return false;
   return mediaTypes.every((type) => {
     if (type === 'audio') return activeMediaPolicy.audio;
     if (type === 'video') return activeMediaPolicy.video;
@@ -146,6 +169,7 @@ function configurePermissions() {
 }
 
 function createWindow() {
+  const devUrl = process.env.VITE_DEV_SERVER_URL;
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -160,35 +184,49 @@ function createWindow() {
       contextIsolation: true,
       sandbox: true,
       webSecurity: true,
+      allowRunningInsecureContent: false,
       spellcheck: false,
+      devTools: Boolean(devUrl),
     },
   });
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (!trustedRendererUrl(url)) event.preventDefault();
+    if (!isTrustedRendererUrl(url)) event.preventDefault();
   });
   mainWindow.on('closed', () => {
     activeMediaPolicy = { audio: false, video: false };
     mainWindow = null;
   });
 
-  const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) mainWindow.loadURL(devUrl);
-  else mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  else mainWindow.loadFile(PRODUCTION_INDEX);
+}
+
+async function cancelLessonsForLearner(learnerId, statusMessage) {
+  for (const [sessionId, lesson] of [...activeLessons.entries()]) {
+    if (lesson.learnerId !== learnerId) continue;
+    try {
+      await memoryStore.cancelSession(learnerId, sessionId, statusMessage);
+    } finally {
+      activeLessons.delete(sessionId);
+    }
+  }
 }
 
 function registerIpc() {
   registerHandler('app:status', async () => {
     const settings = readSettings();
+    const storage = currentSecureStorageStatus();
     return {
       version: app.getVersion(),
       platform: process.platform,
       provider: settings.provider || 'demo',
       model: settings.geminiModel || DEFAULT_GEMINI_MODEL,
       hasGeminiKey: Boolean(settings.geminiKeyEncrypted),
-      secureStorageAvailable: safeStorage.isEncryptionAvailable(),
+      secureStorageAvailable: storage.available,
+      secureStorageBackend: storage.backend,
       vault: vault.status(),
     };
   });
@@ -213,11 +251,10 @@ function registerIpc() {
   });
 
   registerHandler('settings:testProvider', async () => getProvider().healthCheck());
-
   registerHandler('learner:list', async () => memoryStore.listLearners());
 
   registerHandler('learner:create', async (payload) => {
-    if (!safeStorage.isEncryptionAvailable()) {
+    if (!currentSecureStorageStatus().available) {
       throw new Error('Secure device storage is required before creating a learner profile.');
     }
     const preferredName = assertString(payload?.preferredName, 'Child name', 1, 80);
@@ -258,22 +295,20 @@ function registerIpc() {
   registerHandler('learner:archiveMemory', async (payload) => {
     return memoryStore.archiveMemory(
       assertLearnerId(payload?.learnerId),
-      assertString(payload?.memoryId, 'Memory ID', 36, 64),
+      assertUuid(assertString(payload?.memoryId, 'Memory ID', 36, 36), 'Memory ID'),
     );
   });
   registerHandler('learner:restoreMemory', async (payload) => {
     return memoryStore.restoreMemory(
       assertLearnerId(payload?.learnerId),
-      assertString(payload?.memoryId, 'Memory ID', 36, 64),
+      assertUuid(assertString(payload?.memoryId, 'Memory ID', 36, 36), 'Memory ID'),
     );
   });
 
   registerHandler('learner:lock', async (payload) => {
     const learnerId = assertLearnerId(payload?.learnerId);
+    await cancelLessonsForLearner(learnerId, 'The lesson was ended when the learner memory was locked.');
     memoryStore.close(learnerId);
-    for (const [sessionId, lesson] of activeLessons.entries()) {
-      if (lesson.learnerId === learnerId) activeLessons.delete(sessionId);
-    }
     activeMediaPolicy = { audio: false, video: false };
     return { ok: true };
   });
@@ -306,6 +341,7 @@ function registerIpc() {
 
   registerHandler('lesson:start', async (payload) => {
     const learnerId = assertLearnerId(payload?.learnerId);
+    await cancelLessonsForLearner(learnerId, 'A new lesson replaced the previous unfinished lesson.');
     const dashboard = memoryStore.dashboard(learnerId);
     const objective = 'Practise addition within 20';
     const contextPacket = memoryStore.contextPacket(learnerId, objective);
@@ -327,6 +363,7 @@ function registerIpc() {
       contextPacket,
       firstMisconception: null,
       usedPersonalisedIntervention: false,
+      processing: false,
     };
     activeLessons.set(sessionId, lesson);
     return {
@@ -338,132 +375,140 @@ function registerIpc() {
   });
 
   registerHandler('lesson:answer', async (payload) => {
-    const sessionId = assertString(payload?.sessionId, 'Session ID', 36, 36);
+    const sessionId = assertSessionId(payload?.sessionId);
     const lesson = activeLessons.get(sessionId);
     if (!lesson) throw new Error('Lesson session has ended or expired.');
-    const answer = assertString(String(payload?.answer ?? ''), 'Answer', 1, 100);
-    const responseMs = Math.max(0, Number(payload?.responseMs || Date.now() - lesson.startedQuestionAt));
-    const assessment = assessAnswer(lesson.currentQuestion, answer, responseMs, Boolean(payload?.usedHint));
-    if (!assessment.correct && !lesson.firstMisconception) lesson.firstMisconception = assessment.misconception;
-    const intervention = chooseIntervention(assessment, {
-      interests: lesson.dashboard.profile.interests,
-    });
-    if (!assessment.correct) lesson.usedPersonalisedIntervention = intervention.type === 'visual-interest';
+    if (lesson.processing) throw new Error('MindCarry is already checking this answer.');
+    lesson.processing = true;
 
-    const evidenceItem = {
-      correct: assessment.correct,
-      independent: assessment.independent,
-      usedHint: assessment.usedHint,
-      explained: Boolean(payload?.reasoning && String(payload.reasoning).trim().length > 2),
-      transfer: lesson.currentQuestion.representation === 'transfer',
-    };
-    lesson.evidence.push(evidenceItem);
-
-    let explanation = intervention.message;
-    let providerName = 'deterministic';
-    if (!assessment.correct) {
-      try {
-        const providerResponse = await getProvider().explain({
-          learnerName: lesson.dashboard.profile.preferred_name,
-          age: lesson.dashboard.profile.age,
-          interest: lesson.dashboard.profile.interests?.[0],
-          question: lesson.currentQuestion.prompt,
-          misconception: assessment.misconception,
-          successfulStrategy: 'visual counting-on examples',
-          memoryContext: lesson.contextPacket.summaryText,
-        });
-        explanation = providerResponse.text;
-        providerName = providerResponse.provider;
-      } catch {
-        const fallback = await new DemoProvider().explain({
-          learnerName: lesson.dashboard.profile.preferred_name,
-          interest: lesson.dashboard.profile.interests?.[0],
-        });
-        explanation = fallback.text;
-        providerName = 'demo-fallback';
+    try {
+      const rawAnswer = payload?.answer;
+      if (typeof rawAnswer !== 'string' && typeof rawAnswer !== 'number') {
+        throw new Error('Answer is invalid.');
       }
-    }
+      const answer = assertString(String(rawAnswer), 'Answer', 1, 100);
+      const reasoning = typeof payload?.reasoning === 'string' ? payload.reasoning.trim().slice(0, 500) : '';
+      const responseMs = Math.max(0, Number(payload?.responseMs || Date.now() - lesson.startedQuestionAt));
+      const assessment = assessAnswer(lesson.currentQuestion, answer, responseMs, Boolean(payload?.usedHint));
+      if (!assessment.correct && !lesson.firstMisconception) lesson.firstMisconception = assessment.misconception;
+      const intervention = chooseIntervention(assessment, { interests: lesson.dashboard.profile.interests });
+      if (!assessment.correct) lesson.usedPersonalisedIntervention = intervention.type === 'visual-interest';
 
-    await memoryStore.recordAttempt(lesson.learnerId, {
-      sessionId,
-      questionId: lesson.currentQuestion.id,
-      prompt: lesson.currentQuestion.prompt,
-      answerText: answer,
-      ...assessment,
-      intervention: intervention.type,
-      reasoningObservation: assessment.reasoningObservation,
-      provider: providerName,
-    });
+      lesson.evidence.push({
+        correct: assessment.correct,
+        independent: assessment.independent,
+        usedHint: assessment.usedHint,
+        explained: reasoning.length > 2,
+        transfer: lesson.currentQuestion.representation === 'transfer',
+      });
 
-    const movementLevel = Number(payload?.movementLevel);
-    if (activeMediaPolicy.video && Number.isFinite(movementLevel)) {
-      await memoryStore.recordEngagement(lesson.learnerId, {
+      let explanation = intervention.message;
+      let providerName = 'deterministic';
+      if (!assessment.correct) {
+        try {
+          const providerResponse = await getProvider().explain({
+            age: lesson.dashboard.profile.age,
+            interest: lesson.dashboard.profile.interests?.[0],
+            question: lesson.currentQuestion.prompt,
+            misconception: assessment.misconception,
+            successfulStrategy: 'visual counting-on examples',
+            memoryContext: lesson.contextPacket.summaryText,
+          });
+          explanation = providerResponse.text;
+          providerName = providerResponse.provider;
+        } catch {
+          const fallback = await new DemoProvider().explain({
+            learnerName: lesson.dashboard.profile.preferred_name,
+            interest: lesson.dashboard.profile.interests?.[0],
+          });
+          explanation = fallback.text;
+          providerName = 'demo-fallback';
+        }
+      }
+
+      await memoryStore.recordAttempt(lesson.learnerId, {
         sessionId,
-        movementLevel,
-        responseLatencyMs: responseMs,
-        cue: 'Local movement signal recorded with parent consent; not an emotion or diagnosis.',
+        questionId: lesson.currentQuestion.id,
+        prompt: lesson.currentQuestion.prompt,
+        answerText: answer,
+        ...assessment,
+        intervention: intervention.type,
+        reasoningObservation: reasoning || assessment.reasoningObservation,
+        provider: providerName,
       });
-    }
 
-    if (shouldComplete(lesson.evidence)) {
-      const mastery = calculateMastery(lesson.evidence);
-      const profile = lesson.dashboard.profile;
-      const interest = profile.interests?.[0];
-      const correctCount = lesson.evidence.filter((item) => item.correct).length;
-      const memories = [];
-      if (lesson.firstMisconception) {
-        memories.push({
-          type: 'misconception',
-          content: `During addition within 20, the learner showed: ${lesson.firstMisconception}.`,
-          confidence: 0.65,
+      const movementLevel = Number(payload?.movementLevel);
+      if (activeMediaPolicy.video && Number.isFinite(movementLevel)) {
+        await memoryStore.recordEngagement(lesson.learnerId, {
+          sessionId,
+          movementLevel,
+          responseLatencyMs: responseMs,
+          cue: 'Local movement signal recorded with parent consent; not an emotion or diagnosis.',
         });
       }
-      if (lesson.usedPersonalisedIntervention && interest) {
+
+      if (shouldComplete(lesson.evidence)) {
+        const mastery = calculateMastery(lesson.evidence);
+        const profile = lesson.dashboard.profile;
+        const interest = profile.interests?.[0];
+        const correctCount = lesson.evidence.filter((item) => item.correct).length;
+        const memories = [];
+        if (lesson.firstMisconception) {
+          memories.push({
+            type: 'misconception',
+            content: `During addition within 20, the learner showed: ${lesson.firstMisconception}.`,
+            confidence: 0.65,
+          });
+        }
+        if (lesson.usedPersonalisedIntervention && interest) {
+          memories.push({
+            type: 'pedagogical',
+            content: `${interest} examples were used while reteaching counting on. More sessions are needed to confirm effectiveness.`,
+            confidence: 0.55,
+          });
+        }
         memories.push({
-          type: 'pedagogical',
-          content: `${interest} examples were used while reteaching counting on. More sessions are needed to confirm effectiveness.`,
-          confidence: 0.55,
+          type: 'skill',
+          content: 'Completed an addition-within-20 transfer question independently.',
+          confidence: 0.75,
         });
+        const dashboard = await memoryStore.completeSession(lesson.learnerId, sessionId, {
+          mastery,
+          summary: `${profile.preferred_name} answered ${correctCount} of ${lesson.evidence.length} questions correctly and completed the final transfer question independently.`,
+          nextRecommendation:
+            mastery >= 80
+              ? 'Review counting on briefly, then introduce a new addition representation.'
+              : 'Review counting on from the larger number before increasing difficulty.',
+          memories,
+        });
+        activeLessons.delete(sessionId);
+        activeMediaPolicy = { audio: false, video: false };
+        return {
+          completed: true,
+          assessment,
+          explanation: 'You completed a new example independently. MindCarry saved the learning evidence for next time.',
+          mastery,
+          dashboard,
+        };
       }
-      memories.push({
-        type: 'skill',
-        content: 'Completed an addition-within-20 transfer question independently.',
-        confidence: 0.75,
-      });
-      const dashboard = await memoryStore.completeSession(lesson.learnerId, sessionId, {
-        mastery,
-        summary: `${profile.preferred_name} answered ${correctCount} of ${lesson.evidence.length} questions correctly and completed the final transfer question independently.`,
-        nextRecommendation:
-          mastery >= 80
-            ? 'Review counting on briefly, then introduce a new addition representation.'
-            : 'Review counting on from the larger number before increasing difficulty.',
-        memories,
-      });
-      activeLessons.delete(sessionId);
-      activeMediaPolicy = { audio: false, video: false };
+
+      lesson.questionIndex = Math.min(lesson.questionIndex + 1, 2);
+      lesson.currentQuestion = nextQuestion(lesson.questionIndex);
+      lesson.startedQuestionAt = Date.now();
       return {
-        completed: true,
+        completed: false,
         assessment,
-        explanation: 'You completed a new example independently. MindCarry saved the learning evidence for next time.',
-        mastery,
-        dashboard,
+        explanation,
+        question: lesson.currentQuestion,
+        visual: assessment.correct ? null : lesson.currentQuestion.visual,
       };
+    } finally {
+      lesson.processing = false;
     }
-
-    lesson.questionIndex = Math.min(lesson.questionIndex + 1, 2);
-    lesson.currentQuestion = nextQuestion(lesson.questionIndex);
-    lesson.startedQuestionAt = Date.now();
-    return {
-      completed: false,
-      assessment,
-      explanation,
-      question: lesson.currentQuestion,
-      visual: assessment.correct ? null : lesson.currentQuestion.visual,
-    };
   });
 
   registerHandler('lesson:cancel', async (payload) => {
-    const sessionId = assertString(payload?.sessionId, 'Session ID', 36, 36);
+    const sessionId = assertSessionId(payload?.sessionId);
     const lesson = activeLessons.get(sessionId);
     if (!lesson) return { ok: true };
     await memoryStore.cancelSession(lesson.learnerId, sessionId);
@@ -473,24 +518,29 @@ function registerIpc() {
   });
 }
 
-app.whenReady().then(async () => {
-  vault = new VaultManager(path.join(app.getPath('userData'), 'MindCarryVault'));
-  vault.ensure();
-  catalog = new CatalogStore({
-    filePath: vault.catalogPath,
-    getDeviceKey: ensureDeviceKey,
-    atomicWrite: (filePath, data) => vault.atomicWrite(filePath, data),
-  });
-  memoryStore = new MemoryStore(vault, catalog);
-  await memoryStore.initialise();
-  createWindow();
-  configurePermissions();
-  registerIpc();
+app.whenReady()
+  .then(async () => {
+    vault = new VaultManager(path.join(app.getPath('userData'), 'MindCarryVault'));
+    vault.ensure();
+    catalog = new CatalogStore({
+      filePath: vault.catalogPath,
+      getDeviceKey: ensureDeviceKey,
+      atomicWrite: (filePath, data) => vault.atomicWrite(filePath, data),
+    });
+    memoryStore = new MemoryStore(vault, catalog);
+    await memoryStore.initialise();
+    createWindow();
+    configurePermissions();
+    registerIpc();
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  })
+  .catch((error) => {
+    dialog.showErrorBox('MindCarry could not start', error instanceof Error ? error.message : String(error));
+    app.quit();
   });
-});
 
 app.on('before-quit', () => {
   activeMediaPolicy = { audio: false, video: false };
