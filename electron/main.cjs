@@ -412,7 +412,7 @@ function registerIpc() {
             question: lesson.currentQuestion.prompt,
             misconception: assessment.misconception,
             successfulStrategy: 'visual counting-on examples',
-            memoryContext: lesson.contextPacket.summaryText,
+            memoryContext: lesson.contextPacket.providerText,
           });
           explanation = providerResponse.text;
           providerName = providerResponse.provider;
