@@ -14,11 +14,6 @@ function Refresh-Path {
   $env:Path = "$machine;$user"
 }
 
-function Invoke-Native([scriptblock]$Command, [string]$FailureMessage) {
-  & $Command
-  if ($LASTEXITCODE -ne 0) { throw $FailureMessage }
-}
-
 function Install-WithWinget([string]$Id, [string]$Name) {
   if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
     throw "$Name is missing and Windows Package Manager (winget) is unavailable. Install $Name, then rerun this script."
