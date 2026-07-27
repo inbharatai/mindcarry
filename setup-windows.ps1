@@ -6,9 +6,9 @@ function Write-Step([string]$Message) {
   Write-Host "`n==> $Message" -ForegroundColor Cyan
 }
 
-function Get-NodeMajorVersion {
+function Get-NodeVersion {
   $raw = (& node --version).Trim().TrimStart('v')
-  return [int]($raw.Split('.')[0])
+  return [Version]$raw
 }
 
 Set-Location $ProjectRoot
@@ -16,23 +16,26 @@ Start-Transcript -Path $LogPath -Append | Out-Null
 try {
   Write-Step "Checking local requirements"
   if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
-    throw "Node.js 22 LTS or newer is required. Run INSTALL_TO_DESKTOP.ps1 to install prerequisites automatically."
+    throw "Node.js 22.12 or newer is required. Run INSTALL_TO_DESKTOP.ps1 to install prerequisites automatically."
   }
   if (-not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {
     throw "npm was not found beside Node.js. Reinstall Node.js LTS."
   }
-  if ((Get-NodeMajorVersion) -lt 22) {
-    throw "MindCarry requires Node.js 22 LTS or newer. Installed version: $(& node --version)"
+  if ((Get-NodeVersion) -lt [Version]"22.12.0") {
+    throw "MindCarry requires Node.js 22.12 or newer. Installed version: $(& node --version)"
+  }
+  if (-not (Test-Path (Join-Path $ProjectRoot "package-lock.json"))) {
+    throw "package-lock.json is missing. Update the main branch before running setup."
   }
 
   Write-Host "Node $(& node --version)"
   Write-Host "npm $(& npm.cmd --version)"
 
-  Write-Step "Installing pinned project dependencies"
-  & npm.cmd install --no-audit --no-fund
-  if ($LASTEXITCODE -ne 0) { throw "npm install failed." }
+  Write-Step "Installing the locked project dependencies"
+  & npm.cmd ci --no-audit --no-fund
+  if ($LASTEXITCODE -ne 0) { throw "npm ci failed. The repository lockfile and package manifest may be inconsistent." }
 
-  Write-Step "Running lint, encryption tests, integration tests and production build"
+  Write-Step "Running lint, security smoke checks, integration tests and production build"
   & npm.cmd run check
   if ($LASTEXITCODE -ne 0) { throw "MindCarry verification failed. Review $LogPath." }
 
