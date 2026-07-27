@@ -3,7 +3,10 @@ export {};
 declare global {
   interface Window {
     mindcarry: {
-      app: { status: () => Promise<AppStatus> };
+      app: {
+        status: () => Promise<AppStatus>;
+        openDataFolder: () => Promise<{ ok: boolean }>;
+      };
       settings: {
         setGeminiKey: (apiKey: string) => Promise<ProviderStatus>;
         removeGeminiKey: () => Promise<{ ok: boolean }>;
@@ -21,17 +24,27 @@ declare global {
       lessons: {
         start: (learnerId: string) => Promise<LessonStart>;
         answer: (payload: LessonAnswerPayload) => Promise<LessonReply>;
+        cancel: (sessionId: string) => Promise<{ ok: boolean }>;
       };
     };
+  }
+
+  interface VaultStatus {
+    ready: boolean;
+    root: string;
+    learners: string;
+    exports: string;
+    backups: string;
   }
 
   interface AppStatus {
     version: string;
     platform: string;
     provider: 'demo' | 'gemini';
+    model: string;
     hasGeminiKey: boolean;
     secureStorageAvailable: boolean;
-    dataRoot: string;
+    vault: VaultStatus;
   }
 
   interface ProviderStatus {
@@ -42,13 +55,13 @@ declare global {
   }
 
   interface LearnerManifest {
-    schemaVersion: number;
     learnerId: string;
     preferredName: string;
-    age: number;
-    language: string;
+    age: number | null;
+    language: string | null;
     createdAt: string;
     updatedAt: string;
+    metadataState: 'verified' | 'locked';
   }
 
   interface CreateLearnerPayload {
@@ -68,19 +81,54 @@ declare global {
     };
   }
 
+  interface LearnerProfile extends Record<string, unknown> {
+    learner_id: string;
+    preferred_name: string;
+    age: number;
+    preferred_language: string;
+    interests: string[];
+    parent_goal: string;
+    created_at: string;
+    updated_at: string;
+  }
+
+  interface ConsentRecord extends Record<string, number | string> {
+    microphone_allowed: number;
+    camera_allowed: number;
+    local_behaviour_analysis_allowed: number;
+    transcript_storage_allowed: number;
+    raw_audio_storage_allowed: number;
+    raw_video_storage_allowed: number;
+  }
+
+  interface SkillRecord extends Record<string, unknown> {
+    skill_id: string;
+    name: string;
+    mastery: number;
+    status: string;
+  }
+
+  interface SessionRecord extends Record<string, unknown> {
+    session_id: string;
+    objective: string;
+    started_at: string;
+    summary?: string;
+  }
+
+  interface MemoryRecord extends Record<string, unknown> {
+    memory_id: string;
+    type: string;
+    content: string;
+    confidence: number;
+    evidence_count?: number;
+  }
+
   interface Dashboard {
-    profile: Record<string, unknown> & {
-      learner_id: string;
-      preferred_name: string;
-      age: number;
-      preferred_language: string;
-      interests: string[];
-      parent_goal: string;
-    };
-    consent: Record<string, number | string>;
-    skills: Array<Record<string, unknown> & { skill_id: string; name: string; mastery: number; status: string }>;
-    recentSessions: Array<Record<string, unknown> & { session_id: string; started_at: string; summary?: string }>;
-    memories: Array<Record<string, unknown> & { memory_id: string; type: string; content: string; confidence: number }>;
+    profile: LearnerProfile;
+    consent: ConsentRecord;
+    skills: SkillRecord[];
+    recentSessions: SessionRecord[];
+    memories: MemoryRecord[];
   }
 
   interface LessonQuestion {
@@ -88,6 +136,7 @@ declare global {
     skill: string;
     prompt: string;
     answer: number;
+    representation: 'concrete' | 'pictorial' | 'transfer';
     visual: string;
   }
 
