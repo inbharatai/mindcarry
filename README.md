@@ -2,14 +2,15 @@
 
 # MindCarry
 
-### The AI tutor that learns how each child learns.
+### The AI tutor that learns how each child learns
 
-**A local-first, voice-enabled AI tutor alpha with encrypted, portable learner memory.**
+**A local-first tutoring system with encrypted, portable Learner Memory.**
 
-[![Stage](https://img.shields.io/badge/stage-alpha-f59e0b?style=for-the-badge)](#current-status)
-[![Desktop](https://img.shields.io/badge/platform-desktop-334155?style=for-the-badge)](#run-locally)
-[![Local Memory](https://img.shields.io/badge/memory-local%20%26%20encrypted-0f766e?style=for-the-badge)](#privacy-and-data-boundaries)
-[![Gemini](https://img.shields.io/badge/Gemini-optional-4f46e5?style=for-the-badge)](#optional-gemini-setup)
+[![MindCarry CI](https://github.com/inbharatai/mindcarry/actions/workflows/ci.yml/badge.svg)](https://github.com/inbharatai/mindcarry/actions/workflows/ci.yml)
+[![Stage](https://img.shields.io/badge/stage-pre--MVP-f59e0b?style=flat-square)](#current-status)
+[![Desktop](https://img.shields.io/badge/platform-desktop-334155?style=flat-square)](#run-mindcarry-locally)
+[![Storage](https://img.shields.io/badge/learner%20memory-local%20%26%20encrypted-0f766e?style=flat-square)](#automatic-encrypted-vault)
+[![Gemini](https://img.shields.io/badge/Gemini-optional-4f46e5?style=flat-square)](#add-a-gemini-test-key)
 
 </div>
 
@@ -17,304 +18,401 @@
 
 ## What MindCarry is
 
-MindCarry is an experimental desktop AI tutor for children. Its core idea is simple: a useful tutor should not treat every lesson as a fresh conversation. It should gradually remember what a child understands, where they struggle, which explanations help, and what should happen next.
+MindCarry is a pre-MVP AI tutor being built for children aged 5–10 learning foundational reading, writing and maths.
 
-MindCarry keeps that learner history in an encrypted local memory controlled by the family. The AI provider is replaceable; the learner memory is designed to remain portable across supported MindCarry installations.
+A useful tutor should not treat every lesson as a new chat. Over time, it should understand what a child has mastered, where the child hesitates, which misconceptions recur and which explanation helped the child understand.
+
+MindCarry is designed around a **Learner Memory** that is:
+
+- stored on the family’s device;
+- encrypted with a parent passphrase;
+- portable between supported MindCarry installations;
+- separate from the AI provider;
+- structured around learning evidence rather than unlimited chat history.
 
 > [!IMPORTANT]
-> MindCarry is currently an **alpha prototype**, not a finished child-facing product. The present build demonstrates a narrow adaptive maths lesson and the local-memory loop. It is not yet a complete reading, writing and maths curriculum.
+> MindCarry is still **pre-MVP**. The repository contains an implementation-ready desktop prototype codebase and automated tests, but the application must still be installed and tested end to end on the target Windows computer with a real Gemini test key, microphone and optional camera. It is not yet a production child-facing product.
 
-## The product thesis
-
-Most AI tutors are built around a chat session. MindCarry is built around a persistent learner model.
+## Product thesis
 
 ```mermaid
 flowchart LR
     A[Child answers] --> B[Deterministic assessment]
-    B --> C[Choose teaching intervention]
-    C --> D[Optional Gemini explanation]
-    D --> E[Check understanding again]
-    E --> F[Update encrypted learner memory]
-    F --> G[Resume with relevant context next session]
+    B --> C[Identify misconception]
+    C --> D[Select teaching intervention]
+    D --> E[Optional Gemini explanation]
+    E --> F[Independent transfer check]
+    F --> G[Encrypted Learner Memory]
+    G --> H[Relevant context next session]
 ```
 
-The long-term direction is a tutor that can adapt to a child’s:
+The AI model can change. The child’s accumulated learning context should continue with the family.
 
-- mastered skills and unfinished concepts;
-- recurring misconceptions;
-- response time and use of hints;
-- spoken reasoning and pronunciation;
-- interests and preferred examples;
-- successful teaching strategies;
-- observable engagement cues, with parental permission and local processing.
+## First prototype goal
 
-The current alpha implements only a small, testable part of that vision.
+The first complete prototype must prove one narrow loop:
+
+1. A parent creates a learner profile.
+2. MindCarry creates every required local folder automatically.
+3. The learner completes a short voice-enabled maths lesson.
+4. MindCarry identifies a misconception using deterministic assessment logic.
+5. It adapts the explanation and checks a different representation.
+6. The learner completes an independent transfer question.
+7. The result is written to the encrypted local Learner Memory.
+8. The application closes and reopens without losing the learner state.
+9. The encrypted Learner Memory is exported as a `.childmind` package.
+10. Another supported installation imports it and resumes with the same learner context.
 
 ## Current status
 
-| Area | Alpha status |
-|---|---|
-| Learner profiles | Implemented |
-| Parent passphrase | Implemented |
-| Encrypted local learner database | Implemented |
-| Adaptive addition lesson | Implemented |
-| Typed answers | Implemented |
-| Browser/OS speech recognition | Implemented when supported by the device |
-| Misconception detection | Implemented for the current maths flow |
-| Mastery calculation | Implemented for the current maths flow |
-| Session summaries and persistent memories | Implemented |
-| `.childmind` export and import | Implemented |
-| Local camera movement cue | Optional experimental feature |
-| Gemini-generated explanations | Optional with a user-provided API key |
-| Gemini Live real-time voice | Not yet implemented |
-| Reading and phonics curriculum | Planned |
-| Writing support | Planned |
-| Mobile/tablet application | Planned |
+| Capability | Repository status | Device validation |
+|---|---:|---:|
+| Electron + React + TypeScript desktop shell | Implemented | Pending target-device launch |
+| Automatic app vault creation | Implemented | Pending target-device confirmation |
+| Automatic per-learner folder creation | Implemented | Pending target-device confirmation |
+| Parent-passphrase database encryption | Implemented and tested in CI | Pending target-device confirmation |
+| Encrypted device learner catalogue | Implemented and tested in CI | Pending OS credential-store confirmation |
+| Adaptive addition-within-20 flow | Implemented and tested in CI | Pending child/parent testing |
+| Typed answers | Implemented | Pending UI testing |
+| Browser/OS speech recognition | Implemented when supported | Pending Windows microphone testing |
+| Optional local movement cue | Implemented | Pending camera-permission testing |
+| Gemini-generated reteaching explanation | Implemented | Pending real API-key test |
+| Gemini Live real-time voice | Not implemented | Planned |
+| `.childmind` export/import | Implemented and tested in CI | Pending two-installation test |
+| Reading and phonics curriculum | Not implemented | Planned |
+| Writing support | Not implemented | Planned |
+| Production child-safety review | Not completed | Required before public release |
 
-## What this alpha proves
+## Automatic encrypted vault
 
-The current build demonstrates an end-to-end vertical slice:
+Parents do **not** create or connect folders manually.
 
-1. A parent creates a separate learner profile and passphrase.
-2. The child completes a short addition lesson using typed or supported speech input.
-3. MindCarry evaluates the answer with deterministic logic.
-4. It records attempts, misconceptions, interventions and mastery evidence.
-5. The session is written to the encrypted local learner database.
-6. The application can be closed and reopened without losing the learner state.
-7. The learner can be exported as an encrypted `.childmind` file.
-8. Another MindCarry installation can import the learner package and continue from the same memory.
+When MindCarry starts, it automatically creates a private application vault using Electron’s operating-system-specific application-data location. The exact location is shown inside **Settings → Automatic local vault**.
 
-## Personalisation in the alpha
+```text
+MindCarryVault/
+├── vault.json                 # Technical descriptor; no learner PII
+├── settings.json              # OS-encrypted device key and Gemini-key envelope
+├── learner-catalog.enc        # Encrypted local learner list
+├── learners/
+│   └── <learner-uuid>/
+│       ├── manifest.json      # Technical metadata; no child name or age
+│       ├── learner.db.enc     # Encrypted SQLite learner database
+│       ├── backups/           # Rotating encrypted database backups
+│       ├── media/             # Reserved; raw media remains disabled
+│       ├── handwriting/       # Reserved for consented future samples
+│       ├── pronunciation/     # Reserved for consented future samples
+│       └── session-cache/     # Temporary local lesson state
+├── exports/                   # Default location for .childmind exports
+├── backups/
+├── recovery/
+└── temp/
+```
 
-MindCarry currently personalises lessons using:
+### What is encrypted
 
-- the learner’s preferred name;
-- age and language profile;
-- parent-defined goal;
-- interests, such as dinosaurs or space;
-- correctness and independence;
-- response time;
-- hint usage;
-- detected misconception;
-- previous session memories.
+- child profile and parent goal;
+- interests;
+- lesson attempts and response time;
+- misconceptions and interventions;
+- mastery evidence;
+- session summaries;
+- structured learner memories;
+- the local learner catalogue containing learner names.
 
-An optional camera experiment measures **frame-to-frame movement intensity locally**. It does not identify the child, recognise faces, upload frames, infer emotions, or diagnose attention or developmental conditions.
+### What remains outside the learner database
+
+Only non-personal technical metadata required to recognise the encrypted file format, schema version, learner UUID, timestamps and integrity hash.
+
+### Encryption design
+
+- AES-256-GCM authenticated encryption;
+- parent key derived with scrypt and a random salt;
+- random IV for every database save;
+- learner UUID bound as authenticated associated data;
+- atomic file replacement to reduce corruption risk;
+- rotating encrypted backups;
+- database integrity verification after decryption;
+- separate OS-protected device key for the encrypted learner catalogue.
+
+The parent passphrase is not written to disk. MindCarry cannot recover a forgotten passphrase in the current prototype.
+
+## Privacy and AI-provider boundary
+
+MindCarry is local-first, not fully offline when Gemini is enabled.
+
+### Stays local
+
+- permanent learner profile;
+- mastery and progress records;
+- lesson attempts;
+- structured misconceptions;
+- session summaries;
+- encrypted backups;
+- `.childmind` package;
+- camera frame processing in the current experiment.
+
+### Sent to Gemini when enabled
+
+Only a small current-task context needed to generate a short alternative explanation, such as:
+
+- current question;
+- age;
+- one relevant interest;
+- observed misconception;
+- a previously useful teaching strategy.
+
+The complete learner database is never sent to Gemini by this implementation.
+
+### API-key storage
+
+The Gemini key is:
+
+- entered only inside MindCarry Settings;
+- tested before Gemini mode is enabled;
+- encrypted using Electron `safeStorage`;
+- kept outside learner folders;
+- excluded from `.childmind` exports;
+- never intended for source code or `.env` files.
+
+## Multimodal personalisation boundary
+
+The long-term vision includes voice, pronunciation, spoken reasoning, response time, posture and observable engagement cues—with explicit parental permission.
+
+The current camera experiment is deliberately narrow. It calculates frame-to-frame movement intensity locally and does **not**:
+
+- recognise a face;
+- identify a child;
+- infer ethnicity, gender or personality;
+- diagnose emotion, attention, ADHD, autism or any condition;
+- upload webcam frames;
+- save raw video.
+
+Behavioural cues are teaching signals, not medical or psychological conclusions.
 
 ## Architecture
 
 ```mermaid
 flowchart TB
     UI[React child and parent interface]
-    PRELOAD[Restricted Electron preload bridge]
+    BRIDGE[Restricted contextBridge API]
     MAIN[Electron main process]
     ENGINE[Deterministic lesson engine]
-    MEMORY[Encrypted learner memory]
-    DEMO[Local demo provider]
+    VAULT[Automatic encrypted local vault]
+    CATALOG[OS-protected encrypted learner catalogue]
+    DEMO[Local deterministic demo provider]
     GEMINI[Optional Gemini provider]
 
-    UI --> PRELOAD
-    PRELOAD --> MAIN
+    UI --> BRIDGE
+    BRIDGE --> MAIN
     MAIN --> ENGINE
-    MAIN --> MEMORY
+    MAIN --> VAULT
+    MAIN --> CATALOG
     MAIN --> DEMO
-    MAIN -. minimal lesson context .-> GEMINI
+    MAIN -. minimal current-task context .-> GEMINI
 ```
 
 ### Technology
 
-- **Desktop shell:** Electron
-- **Interface:** React + TypeScript + Vite
-- **Local data:** SQL.js / SQLite persisted as encrypted bytes
-- **Encryption:** AES-256-GCM with a scrypt-derived key
-- **AI integration:** Google GenAI SDK with Gemini 3.6 Flash as the configured optional provider
-- **State:** Zustand
-- **Validation:** Zod
-- **Testing:** Vitest plus a dependency-free core smoke test
-- **Packaging:** electron-builder
+- Electron
+- React
+- TypeScript
+- Vite
+- SQL.js / SQLite
+- Node.js cryptography
+- Google Gen AI JavaScript SDK
+- Zod
+- Zustand
+- Vitest
+- electron-builder
+- GitHub Actions on Windows and Linux
 
-## Privacy and data boundaries
-
-MindCarry is local-first, but it is not fully offline when Gemini is enabled.
-
-### Stays on the family’s device
-
-- learner profile;
-- progress and mastery records;
-- attempts and misconceptions;
-- session summaries;
-- structured learner memories;
-- encrypted `.childmind` package;
-- camera movement calculations in the alpha.
-
-### Sent to Gemini only when enabled
-
-- a limited amount of current lesson context required to generate a short explanation.
-
-### Never included in learner exports
-
-- Gemini API keys;
-- operating-system credentials;
-- unencrypted learner database content.
-
-The Gemini key is stored separately using Electron `safeStorage`. Raw camera video and raw audio are not stored by the current alpha.
-
-## Run locally
+## Run MindCarry locally
 
 ### Requirements
 
-- Windows, macOS or Linux desktop environment
-- Node.js **22.12 or newer**
+- Windows 10/11, macOS or a supported Linux desktop
+- Node.js 22.12 or newer
 - Git
+- internet connection only for dependency installation and optional Gemini use
 
-### Clone and start
+### Windows: automated Desktop installation
+
+The installer script creates or updates:
+
+```text
+C:\Users\<Windows-user>\Desktop\MindCarry
+```
+
+Run from PowerShell:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+irm https://raw.githubusercontent.com/inbharatai/mindcarry/main/INSTALL_TO_DESKTOP.ps1 | iex
+```
+
+The script:
+
+1. locates the Windows Desktop automatically;
+2. installs Git and Node.js LTS through `winget` when missing;
+3. creates the `MindCarry` Desktop folder by cloning the repository;
+4. installs pinned dependencies;
+5. runs linting, encryption tests, integration tests and a production build;
+6. starts MindCarry only after verification passes.
+
+For a security-conscious installation, download and inspect `INSTALL_TO_DESKTOP.ps1` before running it rather than piping it directly to PowerShell.
+
+### Existing clone
+
+```powershell
+cd C:\Users\reetu\Desktop\MindCarry
+powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1
+```
+
+### Manual cross-platform setup
 
 ```bash
 git clone https://github.com/inbharatai/mindcarry.git
 cd mindcarry
-npm install
-npm run test:core
+npm install --no-audit --no-fund
+npm run check
 npm run dev
 ```
 
-MindCarry opens in **demo mode** without an API key. This is the safest way to test the learner-memory and lesson flow first.
+MindCarry starts in deterministic **demo mode** without an API key.
 
-### Windows Desktop path
+## Add a Gemini test key
 
-```powershell
-cd C:\Users\reetu\Desktop
-git clone https://github.com/inbharatai/mindcarry.git MindCarry
-cd MindCarry
-npm install
-npm run test:core
-npm run dev
-```
+After the application opens:
 
-## Optional Gemini setup
+1. Open **Settings**.
+2. Confirm the automatic local vault shows **Vault ready**.
+3. Paste the Gemini test API key.
+4. Select **Save securely and test Gemini**.
+5. Confirm the connection test succeeds.
+6. Return to the learner profile and run the lesson.
 
-1. Start MindCarry.
-2. Open **Settings**.
-3. Add a Gemini test API key.
-4. Use **Test connection**.
-5. Return to the learner lesson.
+Do not paste the API key into GitHub, source code, a chat message or a `.env` file.
 
-Do not commit API keys to GitHub, place them in source files, or store them inside a `.childmind` package.
+The current provider is configured for `gemini-2.5-flash` to generate short reteaching explanations. Gemini Live voice is a separate future phase.
 
-The current Gemini integration generates short alternative explanations after an incorrect answer. Speech recognition is still handled by the browser/operating-system capability when available; Gemini Live voice is a later phase.
+## Test scenario
 
-## Useful commands
+Use the first controlled scenario:
+
+- learner: Aarav;
+- age: 7;
+- interest: dinosaurs;
+- goal: build confidence in foundational maths;
+- camera: initially off;
+- raw audio/video storage: off.
+
+Then:
+
+1. Start the addition lesson.
+2. Answer `11` to `7 + 5`.
+3. Explain that the objects were counted incorrectly.
+4. Confirm MindCarry records an off-by-one misconception.
+5. Complete the second question independently.
+6. Complete the transfer question independently.
+7. Review the session summary, mastery and evidence-based memories.
+8. Lock and reopen the learner.
+9. Close and restart MindCarry.
+10. Export the `.childmind` package.
+11. Import it into another installation.
+12. Enter the same parent passphrase and confirm the learner state is restored.
+
+## Development commands
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Start the Vite renderer and Electron app |
-| `npm run test:core` | Run the dependency-free encryption and lesson-engine smoke test |
-| `npm test` | Run the Vitest suite |
+| `npm run dev` | Start Vite and Electron |
+| `npm run lint` | Lint security-sensitive Node/Electron code |
+| `npm run test:core` | Run dependency-free encryption and lesson smoke tests |
+| `npm test` | Run unit and integration tests |
 | `npm run build` | Type-check and build the renderer |
-| `npm run check` | Run the core test and production build |
-| `npm run pack` | Create an unpacked desktop build |
-| `npm run dist` | Build platform packages with electron-builder |
+| `npm run check` | Run the complete local verification pipeline |
+| `npm run pack` | Verify and create an unpacked application build |
+| `npm run dist` | Verify and create platform packages |
 
-## Demo walkthrough
+## What automated tests cover
 
-Use the included test scenario:
+- encryption/decryption round trip;
+- wrong-passphrase rejection;
+- associated-data mismatch;
+- encrypted-data tampering;
+- device-key catalogue encryption;
+- automatic vault and learner-folder creation;
+- atomic writes;
+- spoken-number parsing;
+- misconception classification;
+- interest-based intervention selection;
+- independent-transfer mastery requirement;
+- encrypted learner persistence across restarts;
+- plaintext-manifest PII exclusion;
+- `.childmind` export/import between two installations.
 
-1. Create **Aarav**, age 7, with `dinosaurs` as an interest.
-2. Start the addition lesson.
-3. Give an incorrect answer to the first question.
-4. Observe the misconception and personalised explanation.
-5. Complete the next questions correctly.
-6. Review the mastery result and saved memory.
-7. Close and reopen MindCarry.
-8. Unlock Aarav’s profile and confirm the history remains.
-9. Export `Aarav.childmind`.
-10. Import the file into another supported MindCarry installation.
+Automated tests do not replace real child, parent, accessibility, microphone, camera or model-behaviour testing.
 
-See [`docs/demo-script.md`](docs/demo-script.md) for the exact sequence.
+## Security posture
 
-## Learner-memory portability
+The desktop window uses:
 
-A `.childmind` file contains:
+- `nodeIntegration: false`;
+- `contextIsolation: true`;
+- renderer sandboxing;
+- a restricted preload bridge;
+- sender validation for IPC requests;
+- blocked arbitrary navigation and new windows;
+- explicit media-permission handlers;
+- a restrictive Content Security Policy;
+- no arbitrary renderer filesystem access.
 
-- the already-encrypted learner database;
-- the learner manifest;
-- format and schema version information;
-- an integrity checksum.
+Before a public release, MindCarry still requires:
 
-It does **not** contain the Gemini API key. The original parent passphrase is required to unlock the learner after import.
-
-## Safety principles
-
-MindCarry is being designed for children, so the standard is higher than a general chatbot.
-
-The alpha deliberately avoids:
-
-- face recognition;
-- identity matching;
-- emotion diagnosis;
-- behavioural or medical diagnosis;
-- permanent raw webcam storage;
-- unrestricted open-ended chat;
-- hidden cloud memory presented as local memory.
-
-Before any public child-facing release, the product requires broader curriculum testing, independent privacy and security review, parent controls, child-safety evaluation and real-world testing with families.
+- independent security review;
+- child-safety and safeguarding review;
+- privacy-law review for launch jurisdictions;
+- dependency and software-composition monitoring;
+- signed releases and update security;
+- threat testing on Windows and macOS;
+- parent memory inspection, correction and deletion controls;
+- broader curriculum and assessment validation.
 
 ## Current limitations
 
-- The current curriculum is limited to a small addition-within-20 demonstration.
-- Gemini is used only for optional generated explanations, not full agentic lesson orchestration.
-- Gemini Live voice is not implemented.
-- Speech recognition depends on Chromium/operating-system support.
-- The camera experiment measures movement intensity only.
-- The encrypted database uses SQL.js persisted as encrypted bytes, not SQLCipher.
-- Parent memory review, editing and selective deletion are not complete.
-- The application has not yet undergone independent security, privacy or child-safety review.
-- The repository does not yet include a Vercel deployment because the local desktop application is the current product under test.
-
-## Roadmap
-
-### Alpha hardening
-
-- test the complete Windows setup and packaging flow;
-- validate Gemini connection and failure handling;
-- improve lesson-state recovery;
-- expand automated tests;
-- improve parent-visible memory controls.
-
-### Private beta
-
-- Gemini Live voice;
-- reading and phonics curriculum;
-- stronger mastery and spaced-review model;
-- personal engagement baseline rather than universal assumptions;
-- parent memory review, correction and deletion;
-- tablet-friendly experience.
-
-### Later
-
-- writing analysis with explicit parental consent;
-- additional languages;
-- local-model provider;
-- Android application using the same learner-memory specification;
-- broader reading, writing and maths curriculum.
+- The product is pre-MVP and has not completed a target-device end-to-end run.
+- The curriculum is limited to a small addition-within-20 prototype.
+- Browser/OS speech recognition is not equivalent to Gemini Live voice.
+- The camera experiment measures only movement intensity.
+- The current database is SQL.js persisted as encrypted bytes, not SQLCipher.
+- The Gemini provider generates short reteaching explanations rather than controlling the complete lesson state machine.
+- Parent memory editing, selective deletion and passphrase change are not yet implemented.
+- No production analytics, cloud account system or Vercel deployment is configured.
+- No claim is made that this prototype complies with every child-data law before legal review.
 
 ## Documentation
 
-- [`ABOUT.md`](ABOUT.md) — product purpose, principles and long-term direction
-- [`docs/architecture.md`](docs/architecture.md) — system boundaries and data flow
-- [`docs/privacy-model.md`](docs/privacy-model.md) — local and provider data boundaries
-- [`docs/threat-model.md`](docs/threat-model.md) — security risks and mitigations
-- [`docs/demo-script.md`](docs/demo-script.md) — executable alpha demo
-- [`docs/roadmap.md`](docs/roadmap.md) — development stages
-- [`PROJECT_STATUS.md`](PROJECT_STATUS.md) — implementation and verification status
+- [`ABOUT.md`](ABOUT.md) — product purpose and principles
+- [`PROJECT_STATUS.md`](PROJECT_STATUS.md) — verified implementation status
+- [`docs/architecture.md`](docs/architecture.md) — system design and trust boundaries
+- [`docs/local-vault.md`](docs/local-vault.md) — automatic folder and encryption model
+- [`docs/privacy-model.md`](docs/privacy-model.md) — local/provider data boundary
+- [`docs/threat-model.md`](docs/threat-model.md) — risks and mitigations
+- [`docs/security-audit.md`](docs/security-audit.md) — audit findings and release gates
+- [`docs/demo-script.md`](docs/demo-script.md) — first end-to-end test
+- [`docs/roadmap.md`](docs/roadmap.md) — staged development plan
+- [`SECURITY.md`](SECURITY.md) — vulnerability reporting
 
 ## Deployment note
 
-MindCarry is currently a local Electron application. Vercel is intentionally not configured yet. It may later host a public website, waitlist or a carefully separated web companion, but it should not replace the local learner-memory architecture without an explicit privacy redesign.
+MindCarry is currently a local Electron application. Vercel is intentionally not configured. A future public website or waitlist may be hosted separately, but the local learner-memory architecture must not be replaced accidentally by a cloud database.
 
 ---
 
 <div align="center">
 
-### MindCarry does not only remember what a child learned.
-### It is being built to learn how that specific child learns best.
+### MindCarry should not only remember what a child learned.
+### It should gradually learn how that specific child learns best.
 
 </div>
