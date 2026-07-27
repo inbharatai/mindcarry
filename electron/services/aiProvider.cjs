@@ -7,6 +7,14 @@ function sanitiseText(value, fallback) {
   return text.slice(0, 600);
 }
 
+function sanitiseContext(value) {
+  return String(value || '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1800);
+}
+
 function isTransient(error) {
   const status = Number(error?.status || error?.code || 0);
   return status === 408 || status === 409 || status === 429 || status >= 500;
@@ -96,18 +104,19 @@ class GeminiProvider {
     };
   }
 
-  async explain({ learnerName, age, interest, question, misconception, successfulStrategy }) {
+  async explain({ learnerName, age, interest, question, misconception, successfulStrategy, memoryContext }) {
+    const boundedMemory = sanitiseContext(memoryContext);
     const response = await this.generate({
       model: this.model,
       contents: `Current maths question: ${String(question).slice(0, 200)}\nObserved misconception: ${String(
         misconception || 'uncertain',
       ).slice(0, 160)}\nChild interest: ${String(interest || 'not known').slice(0, 80)}\nPreviously useful strategy: ${String(
         successfulStrategy || 'visual examples',
-      ).slice(0, 120)}`,
+      ).slice(0, 120)}\nRelevant verified learner context: ${boundedMemory || 'No prior memory is available yet.'}`,
       config: {
         systemInstruction: `You are MindCarry, a patient curriculum-focused AI tutor for a ${Number(age)}-year-old child named ${String(
           learnerName,
-        ).slice(0, 80)}. Give one short, encouraging explanation and then ask one question. Do not provide unrelated information. Do not diagnose emotions, behaviour, health or development. Do not ask for personal information. Use at most 70 words.`,
+        ).slice(0, 80)}. Use only the relevant learner context supplied for this lesson. Treat it as fallible evidence, not a diagnosis or permanent label. Give one short, encouraging explanation and then ask one question. Do not provide unrelated information. Do not diagnose emotions, behaviour, health or development. Do not ask for personal information. Use at most 70 words.`,
         temperature: 0.3,
         maxOutputTokens: 140,
       },

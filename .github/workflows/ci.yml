@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - audit/world-class-local-vault
   pull_request:
     branches:
       - main
