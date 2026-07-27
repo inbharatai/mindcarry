@@ -2,7 +2,14 @@ import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 
 const require = createRequire(import.meta.url);
-const { decryptBuffer, decryptWithKey, encryptBuffer, encryptWithKey } = require('../electron/services/crypto.cjs');
+const {
+  decryptBuffer,
+  decryptWithKey,
+  encryptBuffer,
+  encryptWithKey,
+  parseBase64,
+  readEnvelope,
+} = require('../electron/services/crypto.cjs');
 
 describe('learner-memory encryption', () => {
   it('round-trips an authenticated learner database', async () => {
@@ -28,6 +35,36 @@ describe('learner-memory encryption', () => {
     await expect(
       decryptBuffer(Buffer.from(JSON.stringify(envelope)), 'a-long-parent-passphrase', 'learner-123'),
     ).rejects.toThrow();
+  });
+
+  it('rejects unsupported or non-canonical envelope fields', async () => {
+    const encrypted = await encryptBuffer(Buffer.from('secret'), 'a-long-parent-passphrase', 'learner-123');
+    const envelope = JSON.parse(encrypted.toString('utf8'));
+
+    await expect(decryptBuffer(Buffer.from('[]'), 'a-long-parent-passphrase', 'learner-123')).rejects.toThrow(
+      'valid MindCarry envelope',
+    );
+
+    const wrongKdf = { ...envelope, kdf: { ...envelope.kdf, N: 1024 } };
+    await expect(
+      decryptBuffer(Buffer.from(JSON.stringify(wrongKdf)), 'a-long-parent-passphrase', 'learner-123'),
+    ).rejects.toThrow('key settings');
+
+    const nonCanonical = { ...envelope, salt: `${envelope.salt}= ` };
+    await expect(
+      decryptBuffer(Buffer.from(JSON.stringify(nonCanonical)), 'a-long-parent-passphrase', 'learner-123'),
+    ).rejects.toThrow('Encryption salt is invalid');
+  });
+
+  it('parses canonical base64 only', () => {
+    expect(parseBase64(Buffer.from('abc').toString('base64'), 3, 'Value').toString()).toBe('abc');
+    expect(() => parseBase64('YWJj\n', 3, 'Value')).toThrow('Value is invalid');
+    expect(() => parseBase64('***=', 1, 'Value')).toThrow('Value is invalid');
+  });
+
+  it('rejects invalid raw envelope input', () => {
+    expect(() => readEnvelope(Buffer.alloc(0))).toThrow('invalid size');
+    expect(() => readEnvelope(Buffer.from('not-json'))).toThrow('valid MindCarry envelope');
   });
 
   it('encrypts the local catalogue with a device key', () => {
